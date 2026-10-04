@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Feud Online</title>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg1: #0a1a4f; --bg2: #02081f; --gold: #f5c542; --gold2: #b8860b;
+    --tile: #1747c9; --tile2: #0c2a85; --text: #fff; --muted: #9fb3ff;
+    --red: #e3262f; --green: #2ecc71; --t1: #ff9f1c; --t2: #2ec4f1;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    font-family: Inter, system-ui, sans-serif; color: var(--text);
+    background: radial-gradient(ellipse at top, var(--bg1), var(--bg2) 70%) fixed;
+    background-color: var(--bg2);
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
+  h1.logo {
+    font-family: Anton, Impact, sans-serif; text-align: center; margin: 8px 0 16px;
+    font-size: clamp(36px, 8vw, 64px); letter-spacing: 2px; line-height: 1;
+    color: var(--gold); text-shadow: 0 3px 0 #7a4b00, 0 0 24px rgba(245,197,66,.5);
+  }
+  .card {
+    background: rgba(10, 30, 100, .55); border: 2px solid rgba(245,197,66,.4);
+    border-radius: 16px; padding: 20px; margin: 0 auto 16px; max-width: 520px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 20px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; color: var(--muted); font-size: 14px; }
+  input[type=text], select {
+    width: 100%; padding: 12px 14px; font-size: 17px; border-radius: 10px;
+    border: 2px solid #2b4bb5; background: #071340; color: #fff; outline: none;
+  }
+  input[type=text]:focus, select:focus { border-color: var(--gold); }
+  button {
+    font: 800 16px Inter, sans-serif; padding: 12px 20px; border-radius: 10px; border: 0; cursor: pointer;
+    background: linear-gradient(var(--gold), var(--gold2)); color: #1a1000; letter-spacing: .5px;
+  }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.secondary { background: #213a8f; color: #fff; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .row > input { flex: 1; min-width: 0; }
+  .mt { margin-top: 14px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .link-box { word-break: break-all; background: #071340; padding: 10px; border-radius: 8px; font-size: 14px; border: 1px dashed var(--gold); }
+  .hidden { display: none !important; }
+
+  /* Scoreboard */
+  .scores { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: stretch; margin-bottom: 12px; }
+  .team {
+    border-radius: 12px; padding: 10px; text-align: center; background: rgba(0,0,0,.35);
+    border: 3px solid transparent; transition: border-color .2s, box-shadow .2s; min-width: 0;
+  }
+  .team .name { font-weight: 800; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .team .pts { font-family: Anton, Impact, sans-serif; font-size: 36px; line-height: 1.1; }
+  .team.t1 .name { color: var(--t1); } .team.t2 .name { color: var(--t2); }
+  .team.active.t1 { border-color: var(--t1); box-shadow: 0 0 18px rgba(255,159,28,.5); }
+  .team.active.t2 { border-color: var(--t2); box-shadow: 0 0 18px rgba(46,196,241,.5); }
+  .team .you { font-size: 11px; color: var(--muted); }
+  .bank {
+    background: linear-gradient(var(--tile), var(--tile2)); border: 3px solid var(--gold);
+    border-radius: 12px; padding: 8px 16px; text-align: center; min-width: 96px;
+  }
+  .bank .lbl { font-size: 11px; font-weight: 800; color: var(--gold); letter-spacing: 1px; }
+  .bank .pts { font-family: Anton, Impact, sans-serif; font-size: 36px; line-height: 1.1; }
+
+  .meta { text-align: center; color: var(--muted); font-size: 13px; font-weight: 600; margin-bottom: 6px; letter-spacing: 1px; text-transform: uppercase; }
+  .meta .mult { color: var(--gold); }
+  .question {
+    text-align: center; font-weight: 800; font-size: clamp(18px, 4vw, 26px); margin: 0 0 12px;
+    padding: 12px; background: rgba(0,0,0,.35); border-radius: 12px;
+  }
+
+  /* Board */
+  .board {
+    display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: column; grid-template-rows: repeat(4, 1fr);
+    gap: 8px; padding: 12px; border-radius: 18px; border: 5px solid var(--gold);
+    background: #050f33; box-shadow: 0 0 30px rgba(245,197,66,.25), inset 0 0 20px #000;
+  }
+  .tile { perspective: 600px; height: 56px; }
+  .tile-inner { position: relative; width: 100%; height: 100%; transition: transform .6s; transform-style: preserve-3d; }
+  .tile.revealed .tile-inner { transform: rotateX(180deg); }
+  .face {
+    position: absolute; inset: 0; backface-visibility: hidden; border-radius: 8px;
+    display: flex; align-items: center; border: 2px solid #4d74ff;
+  }
+  .front { background: linear-gradient(var(--tile), var(--tile2)); justify-content: center; }
+  .front .num {
+    font-family: Anton, Impact, sans-serif; font-size: 26px; background: #071b63; border: 2px solid #8aa6ff;
+    border-radius: 50%; width: 42px; height: 34px; display: flex; align-items: center; justify-content: center;
+  }
+  .back {
+    transform: rotateX(180deg); background: linear-gradient(#2a62ff, #0d36b0); justify-content: space-between;
+    padding: 0 0 0 12px; font-weight: 800; text-transform: uppercase; font-size: clamp(13px, 2.6vw, 18px);
+  }
+  .back.missed { background: linear-gradient(#3c4466, #232842); color: #c9cfe6; }
+  .back .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .back .p {
+    font-family: Anton, Impact, sans-serif; font-size: 24px; background: #071b63; height: 100%;
+    display: flex; align-items: center; padding: 0 12px; border-radius: 0 6px 6px 0; border-left: 2px solid #4d74ff;
+  }
+  .tile.empty .front { background: #0a1a4f; border-color: #1c2f7a; }
+  .tile.empty .num { display: none; }
+
+  .strikes { display: flex; justify-content: center; gap: 8px; margin: 12px 0; min-height: 44px; }
+  .strike {
+    font-family: Anton, Impact, sans-serif; font-size: 34px; color: var(--red); width: 44px; height: 44px;
+    border: 3px solid var(--red); border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    background: rgba(227,38,47,.12);
+  }
+  .strike.off { opacity: .15; }
+
+  .status { text-align: center; font-weight: 700; font-size: 17px; min-height: 26px; margin: 8px 0; }
+  .status .t1 { color: var(--t1); } .status .t2 { color: var(--t2); }
+  .log { text-align: center; color: var(--muted); font-size: 14px; min-height: 20px; margin-bottom: 8px; }
+  .controls { max-width: 560px; margin: 0 auto; }
+
+  .big-x {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
+    font-family: Anton, Impact, sans-serif; font-size: min(40vw, 260px); color: var(--red);
+    text-shadow: 0 0 40px rgba(227,38,47,.8); opacity: 0; z-index: 10;
+  }
+  .big-x.show { animation: xpop 1.1s ease-out; }
+  @keyframes xpop { 0% { opacity: 0; transform: scale(2); } 15% { opacity: 1; transform: scale(1); } 75% { opacity: 1; } 100% { opacity: 0; } }
+
+  .winner { text-align: center; padding: 24px 12px; }
+  .winner .w { font-family: Anton, Impact, sans-serif; font-size: clamp(32px, 8vw, 56px); color: var(--gold); }
+  .toast {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #222b55; padding: 10px 16px;
+    border-radius: 10px; border: 1px solid var(--gold); font-size: 14px; z-index: 20; max-width: calc(100% - 32px);
+  }
+  @media (max-width: 560px) {
+    .wrap { padding: 12px 16px; }
+    .board { grid-template-columns: 1fr; grid-auto-flow: row; grid-template-rows: none; padding: 8px; }
+    .tile { height: 48px; }
+    .team .pts, .bank .pts { font-size: 28px; }
+    .bank { min-width: 72px; padding: 6px 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="logo">FAMILY FEUD</h1>
+
+  <!-- Setup screen -->
+  <section id="setup" class="card">
+    <h2 id="setupTitle">Create a game</h2>
+    <label for="teamName">Your team name</label>
+    <input id="teamName" type="text" maxlength="20" placeholder="e.g. The Smiths" autocomplete="off">
+    <div id="roundsWrap" class="mt">
+      <label for="rounds">Number of rounds (last round is double points)</label>
+      <select id="rounds">
+        <option value="3">3 rounds</option>
+        <option value="5" selected>5 rounds</option>
+        <option value="7">7 rounds</option>
+        <option value="10">10 rounds</option>
+      </select>
+    </div>
+    <button id="setupBtn" class="mt" style="width:100%">Create game</button>
+    <p class="muted mt" id="setupNote">You'll be Team 1. You'll get a link to send to the other team — whoever opens it plays as Team 2.</p>
+  </section>
+
+  <!-- Lobby -->
+  <section id="lobby" class="card hidden">
+    <h2>Invite Team 2</h2>
+    <p class="muted" id="lobbyStatus">Connecting to game server…</p>
+    <div id="shareWrap" class="hidden">
+      <div class="link-box" id="shareLink"></div>
+      <div class="row mt">
+        <button id="copyBtn" style="flex:1">Copy link</button>
+        <button id="shareBtn" class="secondary hidden" style="flex:1">Share…</button>
+      </div>
+    </div>
+    <button id="startBtn" class="mt hidden" style="width:100%">Start game</button>
+  </section>
+
+  <!-- Game -->
+  <section id="game" class="hidden">
+    <div class="scores">
+      <div class="team t1" id="team1"><div class="name"></div><div class="pts">0</div><div class="you"></div></div>
+      <div class="bank"><div class="lbl">BANK</div><div class="pts" id="bankPts">0</div></div>
+      <div class="team t2" id="team2"><div class="name"></div><div class="pts">0</div><div class="you"></div></div>
+    </div>
+    <div id="roundView">
+      <div class="meta" id="meta"></div>
+      <div class="question" id="question"></div>
+      <div class="board" id="board"></div>
+      <div class="strikes" id="strikes"></div>
+      <div class="status" id="status"></div>
+      <div class="log" id="log"></div>
+      <div class="controls">
+        <form id="guessForm" class="row">
+          <input id="guessInput" type="text" maxlength="40" placeholder="Type your answer…" autocomplete="off">
+          <button type="submit" id="guessBtn">Guess</button>
+        </form>
+        <button id="nextBtn" class="hidden" style="width:100%">Next round</button>
+      </div>
+    </div>
+    <div id="overView" class="winner hidden">
+      <div class="w" id="winnerText"></div>
+      <p class="muted" id="finalScore"></p>
+      <button id="againBtn" class="hidden">Play again</button>
+      <p class="muted hidden" id="againNote">Waiting for Team 1 to start a new game…</p>
+    </div>
+  </section>
+</div>
+<div class="big-x" id="bigX"></div>
+<div class="toast hidden" id="toast"></div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="questions.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const params = new URLSearchParams(location.search);
+  const joinId = params.get("join");
+  const isHost = !joinId;
+  const myTeam = isHost ? 1 : 2;
+  const other = (t) => (t === 1 ? 2 : 1);
+  const PREFIX = "ffeud-online-";
+
+  let peer = null, conn = null, state = null, lastEvent = 0;
+
+  // ---------- Answer matching ----------
+  const STOP = new Set(["a", "an", "the", "my", "some", "your", "their", "his", "her", "of", "to"]);
+  const norm = (s) => s.toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9 ]+/g, " ").split(/\s+/)
+    .filter((w) => w && !STOP.has(w)).map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w)).join(" ");
+  function lev(a, b) {
+    const m = a.length, n = b.length, d = Array.from({ length: m + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return d[m][n];
+  }
+  const tol = (len) => (len >= 8 ? 2 : len >= 5 ? 1 : 0);
+  function close(g, c) {
+    if (!g || !c) return false;
+    if (g === c || g.replace(/ /g, "") === c.replace(/ /g, "")) return true;
+    if (lev(g, c) <= tol(c.length)) return true;
+    // whole-phrase containment, e.g. "a big dog" -> "dog", "pepperoni pizza" -> "pepperoni"
+    const gw = g.split(" "), cw = c.split(" ");
+    for (let i = 0; i + cw.length <= gw.length; i++) {
+      if (cw.every((w, k) => w === gw[i + k] || (w.length >= 5 && lev(w, gw[i + k]) <= tol(w.length)))) return true;
+    }
+    return false;
+  }
+  function matchAnswer(q, guess) {
+    const g = norm(guess);
+    for (let i = 0; i < q.a.length; i++) {
+      const [text, , ...alts] = q.a[i];
+      if ([text, ...alts].some((c) => close(g, norm(c)))) return i;
+    }
+    return -1;
+  }
+
+  // ---------- Sounds ----------
+  let actx = null;
+  function tone(freq, dur, type = "sine", vol = 0.2, when = 0) {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const t = actx.currentTime + when, o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.value = freq; g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur);
+    } catch (e) {}
+  }
+  const sfx = {
+    ding: () => { tone(880, 0.25, "triangle", 0.25); tone(1320, 0.5, "triangle", 0.2, 0.12); },
+    buzz: () => { tone(110, 0.7, "sawtooth", 0.25); tone(116, 0.7, "square", 0.12); },
+    win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.35, "triangle", 0.2, i * 0.13)),
+  };
+  document.addEventListener("pointerdown", () => { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {} }, { once: true });
+
+  function toast(msg, ms = 2500) {
+    const t = $("toast"); t.textContent = msg; t.classList.remove("hidden");
+    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), ms);
+  }
+
+  // ---------- Host game logic (host is authoritative) ----------
+  function newState(name1, rounds) {
+    return {
+      phase: "lobby", rounds, round: 0, used: [], q: -1,
+      teams: { 1: { name: name1, score: 0 }, 2: { name: "Team 2", score: 0, connected: false } },
+      revealed: [], strikes: 0, control: 0, bank: 0, faceoff: { 1: null, 2: null }, foOrder: [],
+      log: "", event: { n: 0 }, roundWinner: 0,
+    };
+  }
+  const mult = (s) => (s.round === s.rounds ? 2 : 1);
+  const curQ = (s) => QUESTIONS[s.q];
+  const fire = (type, extra = {}) => { state.event = { n: state.event.n + 1, type, ...extra }; };
+
+  function startRound() {
+    let pool = QUESTIONS.map((_, i) => i).filter((i) => !state.used.includes(i));
+    if (!pool.length) { state.used = []; pool = QUESTIONS.map((_, i) => i); }
+    state.q = pool[Math.floor(Math.random() * pool.length)];
+    state.used.push(state.q);
+    state.round++;
+    state.revealed = curQ(state).a.map(() => false);
+    Object.assign(state, { phase: "faceoff", strikes: 0, control: 0, bank: 0, faceoff: { 1: null, 2: null }, foOrder: [], roundWinner: 0 });
+    state.log = "Face-off! Both teams submit one answer — the higher answer wins control.";
+    fire("round");
+  }
+
+  function reveal(i) { if (!state.revealed[i]) { state.revealed[i] = true; state.bank += curQ(state).a[i][1]; } }
+  const boardCleared = () => state.revealed.every(Boolean);
+
+  function award(team, why) {
+    const pts = state.bank * mult(state);
+    state.teams[team].score += pts;
+    state.roundWinner = team;
+    state.phase = "roundEnd";
+    state.log = `${why} ${state.teams[team].name} wins ${pts} points${mult(state) > 1 ? " (double!)" : ""}.`;
+    fire("award", { team });
+  }
+
+  function handleGuess(team, text) {
+    text = String(text || "").trim().slice(0, 40);
+    if (!text || !state) return;
+    const q = curQ(state), idx = matchAnswer(q, text), nm = state.teams[team].name;
+
+    if (state.phase === "faceoff") {
+      if (state.faceoff[team]) return;
+      state.faceoff[team] = { text, idx };
+      state.foOrder.push(team);
+      if (!state.faceoff[other(team)]) { state.log = `${nm} locked in their face-off answer…`; fire("tick"); return; }
+      const [a, b] = state.foOrder, fa = state.faceoff[a], fb = state.faceoff[b];
+      const desc = (t, f) => `${state.teams[t].name}: “${f.text}” ${f.idx >= 0 ? "(#" + (f.idx + 1) + ")" : "(not on board)"}`;
+      if (fa.idx < 0 && fb.idx < 0) {
+        state.faceoff = { 1: null, 2: null }; state.foOrder = [];
+        state.log = `${desc(a, fa)} · ${desc(b, fb)} — neither on the board. Face off again!`;
+        fire("buzz"); return;
+      }
+      if (fa.idx >= 0) reveal(fa.idx);
+      if (fb.idx >= 0) reveal(fb.idx);
+      const rank = (f) => (f.idx < 0 ? 99 : f.idx);
+      const winner = rank(fa) <= rank(fb) ? a : b;
+      state.control = winner;
+      state.log = `${desc(a, fa)} · ${desc(b, fb)} — ${state.teams[winner].name} takes control!`;
+      if (boardCleared()) return award(winner, "Board cleared!");
+      state.phase = "play"; fire("ding"); return;
+    }
+
+    if (state.phase === "play") {
+      if (team !== state.control) return;
+      if (idx >= 0 && state.revealed[idx]) { state.log = `“${text}” is already on the board — try again.`; fire("tick"); return; }
+      if (idx >= 0) {
+        reveal(idx); state.log = `${nm}: “${text}” — it's on the board!`;
+        if (boardCleared()) return award(team, "Board cleared!");
+        fire("ding"); return;
+      }
+      state.strikes++;
+      state.log = `${nm}: “${text}” — STRIKE ${state.strikes}!`;
+      if (state.strikes >= 3) {
+        state.phase = "steal";
+        state.log += ` ${state.teams[other(team)].name} gets one guess to steal the bank!`;
+      }
+      fire("strike", { count: state.strikes }); return;
+    }
+
+    if (state.phase === "steal") {
+      if (team === state.control) return;
+      if (idx >= 0 && !state.revealed[idx]) {
+        reveal(idx); state.log = `${nm}: “${text}” — STEAL!`;
+        fire("ding"); return award(team, "Steal successful!");
+      }
+      state.log = `${nm}: “${text}” — no steal.`;
+      fire("buzz");
+      return award(state.control, "Steal failed!");
+    }
+  }
+
+  function handleNext(team) {
+    if (state.phase === "roundEnd") {
+      if (state.round >= state.rounds) { state.phase = "gameOver"; fire("win"); }
+      else startRound();
+    } else if (state.phase === "gameOver" && team === 1) {
+      state.teams[1].score = 0; state.teams[2].score = 0; state.round = 0;
+      startRound();
+    }
+  }
+
+  // What each player is allowed to see (hidden answers stay on the host)
+  function view(s) {
+    const q = s.q >= 0 ? QUESTIONS[s.q] : null, showAll = s.phase === "roundEnd" || s.phase === "gameOver";
+    const fo = {};
+    for (const t of [1, 2]) fo[t] = s.faceoff[t] ? (s.phase === "faceoff" ? { locked: true } : s.faceoff[t]) : null;
+    return {
+      ...s, faceoff: fo, used: undefined,
+      question: q ? { cat: q.cat, q: q.q } : null,
+      answers: q ? q.a.map((a, i) => (s.revealed[i] || showAll ? { text: a[0], pts: a[1], revealed: s.revealed[i] } : null)) : [],
+    };
+  }
+
+  function commit() {
+    try { sessionStorage.setItem("ffeud-host", JSON.stringify({ id: peer && peer.id, state })); } catch (e) {}
+    const v = view(state);
+    render(v);
+    if (conn && conn.open) conn.send({ t: "state", state: v });
+  }
+
+  // ---------- Networking ----------
+  const rid = () => Math.random().toString(36).slice(2, 10);
+
+  function startHost(saved) {
+    const id = (saved && saved.id) || PREFIX + rid();
+    show("lobby");
+    peer = new Peer(id);
+    peer.on("open", (pid) => {
+      const link = location.origin + location.pathname + "?join=" + encodeURIComponent(pid.slice(PREFIX.length));
+      $("shareLink").textContent = link; $("shareWrap").classList.remove("hidden");
+      if (navigator.share) $("shareBtn").classList.remove("hidden");
+      $("copyBtn").onclick = () => navigator.clipboard.writeText(link).then(() => toast("Link copied!"), () => toast("Copy failed — select the link manually"));
+      $("shareBtn").onclick = () => navigator.share({ title: "Family Feud", text: "Join my Family Feud game as Team 2!", url: link }).catch(() => {});
+      updateLobby();
+      commit();
+    });
+    peer.on("connection", (c) => {
+      if (conn && conn.open) { c.on("open", () => { c.send({ t: "full" }); setTimeout(() => c.close(), 500); }); return; }
+      conn = c;
+      c.on("data", (m) => {
+        if (!m || typeof m !== "object") return;
+        if (m.t === "hello") {
+          state.teams[2].name = String(m.name || "Team 2").slice(0, 20) || "Team 2";
+          state.teams[2].connected = true;
+          toast(`${state.teams[2].name} joined!`);
+          updateLobby(); commit();
+        } else if (m.t === "guess") { handleGuess(2, m.text); commit(); }
+        else if (m.t === "next") { handleNext(2); commit(); }
+      });
+      c.on("close", () => { if (conn === c) { conn = null; state.teams[2].connected = false; toast("Team 2 disconnected — they can reopen the link to rejoin.", 4000); updateLobby(); commit(); } });
+    });
+    peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
+    peer.on("error", (e) => {
+      if (e.type === "unavailable-id") { $("lobbyStatus").textContent = "Reconnecting…"; peer.destroy(); setTimeout(() => startHost(saved), 2500); }
+      else if (e.type !== "peer-unavailable") toast("Connection error: " + e.type, 4000);
+    });
+  }
+
+  function updateLobby() {
+    if (!state) return;
+    const joined = state.teams[2].connected;
+    $("lobbyStatus").innerHTML = joined
+      ? `<b style="color:var(--t2)">${esc(state.teams[2].name)}</b> has joined as Team 2. Ready when you are!`
+      : "Send this link to the other team. When they open it, they'll join as Team 2.";
+    $("startBtn").classList.toggle("hidden", !joined || state.phase !== "lobby");
+  }
+
+  function startGuest(name) {
+    show("lobby");
+    $("lobby").querySelector("h2").textContent = "Joining game…";
+    $("lobbyStatus").textContent = "Connecting to Team 1…";
+    peer = new Peer();
+    const connect = () => {
+      const c = peer.connect(PREFIX + joinId, { reliable: true });
+      c.on("open", () => { conn = c; c.send({ t: "hello", name }); $("lobbyStatus").textContent = "Connected! Waiting for Team 1 to start the game…"; });
+      c.on("data", (m) => {
+        if (m.t === "state") { state = m.state; render(state); }
+        else if (m.t === "full") { $("lobbyStatus").textContent = "This game already has a Team 2."; }
+      });
+      c.on("close", () => { if (conn === c) { conn = null; toast("Lost connection — reconnecting…", 3000); setTimeout(connect, 2500); } });
+    };
+    peer.on("open", connect);
+    peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
+    peer.on("error", (e) => {
+      if (e.type === "peer-unavailable") { $("lobbyStatus").textContent = "Can't find that game. Is Team 1's page still open? Retrying…"; setTimeout(connect, 3000); }
+      else toast("Connection error: " + e.type, 4000);
+    });
+  }
+
+  function send(msg) {
+    if (isHost) { msg.t === "guess" ? handleGuess(1, msg.text) : handleNext(1); commit(); }
+    else if (conn && conn.open) conn.send(msg);
+    else toast("Not connected yet…");
+  }
+
+  // ---------- Rendering ----------
+  function show(which) { for (const id of ["setup", "lobby", "game"]) $(id).classList.toggle("hidden", id !== which); }
+
+  function render(v) {
+    if (v.phase === "lobby") { if (isHost) updateLobby(); return; }
+    show("game");
+    for (const t of [1, 2]) {
+      const el = $("team" + t);
+      el.querySelector(".name").textContent = v.teams[t].name;
+      el.querySelector(".pts").textContent = v.teams[t].score;
+      el.querySelector(".you").textContent = t === myTeam ? "(you)" : (t === 2 && isHost && !v.teams[2].connected ? "offline" : "");
+      const active = (v.phase === "play" && v.control === t) || (v.phase === "steal" && v.control !== t) || (v.phase === "faceoff" && !v.faceoff[t]);
+      el.classList.toggle("active", active);
+    }
+    $("bankPts").textContent = v.bank;
+
+    const over = v.phase === "gameOver";
+    $("roundView").classList.toggle("hidden", over);
+    $("overView").classList.toggle("hidden", !over);
+    if (over) {
+      const [s1, s2] = [v.teams[1].score, v.teams[2].score];
+      $("winnerText").textContent = s1 === s2 ? "IT'S A TIE!" : `${(s1 > s2 ? v.teams[1] : v.teams[2]).name} WINS!`;
+      $("finalScore").textContent = `${v.teams[1].name} ${s1} — ${s2} ${v.teams[2].name}`;
+      $("againBtn").classList.toggle("hidden", !isHost);
+      $("againNote").classList.toggle("hidden", isHost);
+    } else {
+      $("meta").innerHTML = `Round ${v.round} of ${v.rounds} · ${esc(v.question.cat)}` + (v.round === v.rounds ? ` · <span class="mult">Double points</span>` : "");
+      $("question").textContent = v.question.q;
+      const n = v.answers.length;
+      $("board").innerHTML = Array.from({ length: Math.max(n, 6) }, (_, i) => {
+        if (i >= n) return `<div class="tile empty"><div class="tile-inner"><div class="face front"></div></div></div>`;
+        const a = v.answers[i];
+        return `<div class="tile ${a ? "revealed" : ""}"><div class="tile-inner">
+          <div class="face front"><span class="num">${i + 1}</span></div>
+          <div class="face back ${a && !a.revealed ? "missed" : ""}"><span class="txt">${a ? esc(a.text) : ""}</span><span class="p">${a ? a.pts : ""}</span></div>
+        </div></div>`;
+      }).join("");
+      $("strikes").innerHTML = v.phase === "faceoff" ? "" : [1, 2, 3].map((k) => `<div class="strike ${k <= v.strikes ? "" : "off"}">X</div>`).join("");
+      $("log").textContent = v.log;
+
+      const tn = (t) => `<span class="t${t}">${esc(v.teams[t].name)}</span>`;
+      let status = "", canGuess = false;
+      if (v.phase === "faceoff") {
+        canGuess = !v.faceoff[myTeam];
+        status = canGuess ? "FACE-OFF: enter your best answer!" : `Locked in — waiting for ${tn(other(myTeam))}…`;
+      } else if (v.phase === "play") {
+        canGuess = v.control === myTeam;
+        status = canGuess ? `Your turn — ${3 - v.strikes} strike${3 - v.strikes === 1 ? "" : "s"} left` : `${tn(v.control)} is guessing…`;
+      } else if (v.phase === "steal") {
+        canGuess = v.control !== myTeam;
+        status = canGuess ? "STEAL! One guess to take the bank — talk it over!" : `${tn(other(v.control))} is trying to steal…`;
+      } else if (v.phase === "roundEnd") {
+        status = `${tn(v.roundWinner)} wins the round!`;
+      }
+      $("status").innerHTML = status;
+      $("guessForm").classList.toggle("hidden", !canGuess);
+      $("nextBtn").classList.toggle("hidden", v.phase !== "roundEnd");
+      $("nextBtn").textContent = v.round >= v.rounds ? "See final results" : "Next round";
+      if (canGuess && document.activeElement !== $("guessInput") && matchMedia("(pointer:fine)").matches) $("guessInput").focus();
+    }
+
+    if (v.event && v.event.n > lastEvent) {
+      const first = lastEvent === 0; lastEvent = v.event.n;
+      if (!first) {
+        const e = v.event;
+        if (e.type === "ding") sfx.ding();
+        else if (e.type === "buzz") sfx.buzz();
+        else if (e.type === "strike") { sfx.buzz(); bigX(e.count); }
+        else if (e.type === "award") sfx.win();
+        else if (e.type === "win") sfx.win();
+      }
+    }
+  }
+
+  function bigX(count) {
+    const el = $("bigX"); el.textContent = "X".repeat(count || 1);
+    el.classList.remove("show"); void el.offsetWidth; el.classList.add("show");
+  }
+
+  // ---------- Wire up UI ----------
+  $("guessForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = $("guessInput").value.trim();
+    if (!text) return;
+    $("guessInput").value = "";
+    send({ t: "guess", text });
+  });
+  $("nextBtn").onclick = () => send({ t: "next" });
+  $("againBtn").onclick = () => send({ t: "next" });
+  $("startBtn").onclick = () => { if (state.teams[2].connected) { startRound(); commit(); } };
+
+  if (!isHost) {
+    $("setupTitle").textContent = "You've been invited to Family Feud!";
+    $("roundsWrap").classList.add("hidden");
+    $("setupBtn").textContent = "Join as Team 2";
+    $("setupNote").textContent = "You'll play as Team 2 against the person who sent you this link.";
+  }
+  try { $("teamName").value = localStorage.getItem("ffeud-name") || ""; } catch (e) {}
+
+  $("setupBtn").onclick = () => {
+    const name = $("teamName").value.trim().slice(0, 20) || (isHost ? "Team 1" : "Team 2");
+    try { localStorage.setItem("ffeud-name", name); } catch (e) {}
+    if (isHost) { state = newState(name, +$("rounds").value); startHost(null); }
+    else startGuest(name);
+  };
+  $("teamName").addEventListener("keydown", (e) => { if (e.key === "Enter") $("setupBtn").click(); });
+
+  // Host refreshed mid-game: restore and keep the same link
+  if (isHost) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("ffeud-host") || "null");
+      if (saved && saved.id && saved.state) {
+        state = saved.state; state.teams[2].connected = false; lastEvent = state.event.n;
+        startHost(saved);
+        if (state.phase !== "lobby") render(view(state));
+      }
+    } catch (e) {}
+  }
+})();
+</script>
+</body>
+</html>
