@@ -132,8 +132,16 @@
     max-width: 560px; margin: 0 auto 12px; padding: 10px 14px; border-radius: 10px; font-size: 14px;
     background: rgba(46,204,113,.12); border: 1px dashed var(--green); color: #c8f7da;
   }
-  .hack > div { display: flex; justify-content: space-between; padding: 2px 0; }
-  .hack .hack-title { font-weight: 800; color: var(--green); margin-bottom: 4px; }
+  .hack .hack-title { font-weight: 800; color: var(--green); }
+  .hack-head { display: flex; justify-content: space-between; align-items: center; }
+  .hack button { padding: 6px 10px; font-size: 13px; }
+  .hack .hack-x { padding: 4px 10px; }
+  .hack-sec { font-weight: 800; color: var(--green); margin: 12px 0 4px; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+  .hack-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 3px 0; }
+  .hack-traps { display: flex; flex-wrap: wrap; gap: 6px; }
+  .hack-traps span { background: rgba(227,38,47,.18); border: 1px solid var(--red); color: #ffc9cc; padding: 2px 8px; border-radius: 6px; }
+  .hack input[type=number] { flex: 1; min-width: 0; padding: 8px; font-size: 15px; border-radius: 8px; border: 2px solid #2b4bb5; background: #071340; color: #fff; }
+  .hack-cmds { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .toast {
     position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #222b55; padding: 10px 16px;
     border-radius: 10px; border: 1px solid var(--gold); font-size: 14px; z-index: 20; max-width: calc(100% - 32px);
@@ -327,7 +335,10 @@
   function handleGuess(team, text) {
     text = String(text || "").trim().slice(0, 40);
     if (!text || !state) return;
-    const q = curQ(state), idx = matchAnswer(q, text), nm = state.teams[team].name;
+    const q = curQ(state), nm = state.teams[team].name;
+    // Admin toggles: a jinxed team always misses; a blocked team's steal always fails
+    const forcedMiss = (state.jinx || {})[team] || (state.phase === "steal" && (state.blockSteal || {})[team]);
+    const idx = forcedMiss ? -1 : matchAnswer(q, text);
 
     if (state.phase === "faceoff") {
       if (state.faceoff[team]) return;
@@ -379,6 +390,39 @@
       return award(state.control, "Steal failed!");
     }
   }
+
+  // Secret admin commands (unlocked by typing "hack")
+  function handleAdmin(team, cmd, arg) {
+    const live = ["faceoff", "play", "steal"].includes(state.phase);
+    if (cmd === "points") {
+      const t = arg && arg.team === 2 ? 2 : 1, amt = Math.max(-9999, Math.min(9999, Math.round(+(arg && arg.amt) || 0)));
+      state.teams[t].score += amt;
+    } else if (cmd === "reveal" && live) {
+      const i = +arg;
+      if (!(i >= 0 && i < state.revealed.length) || state.revealed[i]) return;
+      reveal(i);
+      if (boardCleared()) return award(state.control || team, "Board cleared!");
+      fire("ding");
+    } else if (cmd === "strikes" && (state.phase === "play" || state.phase === "steal")) {
+      state.strikes = 0; state.phase = "play";
+    } else if (cmd === "control" && live) {
+      Object.assign(state, { control: team, phase: "play", strikes: 0 });
+      state.log = `${state.teams[team].name} has control!`;
+    } else if (cmd === "double" && live) {
+      state.bank *= 2;
+    } else if (cmd === "win" && live) {
+      award(team, "Round over!");
+    } else if (cmd === "skip" && state.phase !== "lobby" && state.phase !== "gameOver") {
+      state.round--; startRound();
+    } else if (cmd === "jinx" || cmd === "nosteal") {
+      const k = cmd === "jinx" ? "jinx" : "blockSteal";
+      state[k] = state[k] || {};
+      state[k][other(team)] = !state[k][other(team)];
+    } else if (cmd === "end" && state.phase !== "lobby" && state.phase !== "gameOver") {
+      state.phase = "gameOver"; fire("win");
+    }
+  }
+  const hackData = () => { const q = curQ(state); return { key: state.round + "|" + q.q, answers: q.a.map((a) => [a[0], a[1]]), fake: (window.DECOYS || {})[q.cat] || [] }; };
 
   function handleNext(team) {
     if (state.phase === "roundEnd") {
@@ -437,7 +481,8 @@
           updateLobby(); commit();
         } else if (m.t === "guess") { handleGuess(2, m.text); commit(); }
         else if (m.t === "next") { handleNext(2); commit(); }
-        else if (m.t === "hack" && state.q >= 0) c.send({ t: "hack", answers: curQ(state).a.map((a) => [a[0], a[1]]) });
+        else if (m.t === "hack" && state.q >= 0) c.send({ t: "hack", ...hackData() });
+        else if (m.t === "admin") { handleAdmin(2, m.cmd, m.arg); commit(); }
       });
       c.on("close", () => { if (conn === c) { conn = null; state.teams[2].connected = false; toast("Team 2 disconnected — they can reopen the link to rejoin.", 4000); updateLobby(); commit(); } });
     });
@@ -467,7 +512,7 @@
       c.on("open", () => { conn = c; c.send({ t: "hello", name }); $("lobbyStatus").textContent = "Connected! Waiting for Team 1 to start the game…"; });
       c.on("data", (m) => {
         if (m.t === "state") { state = m.state; render(state); }
-        else if (m.t === "hack") { showHack(m.answers); }
+        else if (m.t === "hack") { hack.data = m; renderHack(state); }
         else if (m.t === "full") { $("lobbyStatus").textContent = "This game already has a Team 2."; }
       });
       c.on("close", () => { if (conn === c) { conn = null; toast("Lost connection — reconnecting…", 3000); setTimeout(connect, 2500); } });
@@ -525,7 +570,6 @@
       }).join("");
       $("strikes").innerHTML = v.phase === "faceoff" ? "" : [1, 2, 3].map((k) => `<div class="strike ${k <= v.strikes ? "" : "off"}">X</div>`).join("");
       $("log").textContent = v.log;
-      if (v.round !== hackRound) $("hackBox").classList.add("hidden");
 
       const tn = (t) => `<span class="t${t}">${esc(v.teams[t].name)}</span>`;
       let status = "", canGuess = false;
@@ -547,6 +591,8 @@
       $("nextBtn").textContent = v.round >= v.rounds ? "See final results" : "Next round";
       if (canGuess && document.activeElement !== $("guessInput") && matchMedia("(pointer:fine)").matches) $("guessInput").focus();
     }
+
+    renderHack(v);
 
     if (v.event && v.event.n > lastEvent) {
       const first = lastEvent === 0; lastEvent = v.event.n;
@@ -572,22 +618,67 @@
     const text = $("guessInput").value.trim();
     if (!text) return;
     $("guessInput").value = "";
-    if (text.toLowerCase() === "hack") {
-      if (isHost) { if (state.q >= 0) showHack(curQ(state).a); }
-      else if (conn && conn.open) conn.send({ t: "hack" });
-      return;
-    }
+    if (text.toLowerCase() === "hack") return openHack();
     send({ t: "guess", text });
   });
 
-  // Secret cheat: only the player who typed "hack" sees the answers
-  let hackRound = -1;
-  function showHack(list) {
-    hackRound = state.round;
-    $("hackBox").innerHTML = `<div class="hack-title">🤫 Secret answers (only you can see this)</div>` +
-      list.map(([text, pts], i) => `<div><span>${i + 1}. ${esc(text)}</span><span>${pts}</span></div>`).join("");
-    $("hackBox").classList.remove("hidden");
+  // ---------- Secret "hack" admin panel (only the player who typed it sees it) ----------
+  const hack = { open: false, data: null, asked: "" };
+  function openHack() { hack.open = true; renderHack(isHost ? view(state) : state); }
+  function admin(cmd, arg) {
+    if (isHost) { handleAdmin(1, cmd, arg); commit(); }
+    else if (conn && conn.open) conn.send({ t: "admin", cmd, arg });
   }
+  function renderHack(v) {
+    const box = $("hackBox");
+    if (!hack.open || !v || !v.question || v.phase === "gameOver") return box.classList.add("hidden");
+    const key = v.round + "|" + v.question.q;
+    if (isHost) hack.data = hackData();
+    else if ((!hack.data || hack.data.key !== key) && hack.asked !== key && conn && conn.open) { hack.asked = key; conn.send({ t: "hack" }); }
+    if (!hack.data || hack.data.key !== key) { box.innerHTML = `<div class="hack-title">🤫 Loading secret answers…</div>`; return box.classList.remove("hidden"); }
+    const live = ["faceoff", "play", "steal"].includes(v.phase), amt = $("hackAmt") ? $("hackAmt").value : "50";
+    const btn = (cmd, label, ok = live) => `<button class="secondary" data-cmd="${cmd}" ${ok ? "" : "disabled"}>${label}</button>`;
+    box.innerHTML = `
+      <div class="hack-head"><span class="hack-title">🤫 Admin panel (only you can see this)</span><button class="secondary hack-x" data-cmd="close">✕</button></div>
+      <div class="hack-sec">Answers</div>
+      ${hack.data.answers.map(([text, pts], i) => `<div class="hack-row"><span>${i + 1}. ${esc(text)} <b>${pts}</b></span>
+        ${v.answers[i] && v.answers[i].revealed ? `<span class="muted">on board</span>` : `<button class="secondary" data-cmd="reveal" data-arg="${i}" ${live ? "" : "disabled"}>Reveal</button>`}</div>`).join("")}
+      <div class="hack-sec">Traps — NOT on the board</div>
+      <div class="hack-traps">${hack.data.fake.map((f) => `<span>✗ ${esc(f)}</span>`).join("")}</div>
+      <div class="hack-sec">Add points (negative takes away)</div>
+      <div class="row"><input id="hackAmt" type="number" value="${esc(amt)}" step="10">
+        <button data-cmd="points" data-arg="1">+ ${esc(v.teams[1].name)}</button><button data-cmd="points" data-arg="2">+ ${esc(v.teams[2].name)}</button></div>
+      <div class="hack-sec">Commands</div>
+      <div class="hack-cmds">
+        ${btn("strikes", "Clear strikes", v.phase === "play" || v.phase === "steal")}${btn("control", "Take control")}
+        ${btn("double", "Double the bank")}${btn("win", "Win this round")}
+        ${btn("skip", "Skip question", v.phase !== "lobby")}${btn("end", "End game now", v.phase !== "lobby")}
+        ${btn("nosteal", `Block their steal: ${(v.blockSteal || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
+        ${btn("jinx", `Jinx (they always miss): ${(v.jinx || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
+      </div>`;
+    box.classList.remove("hidden");
+  }
+  $("hackBox").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-cmd]");
+    if (!b) return;
+    const cmd = b.dataset.cmd;
+    if (cmd === "close") { hack.open = false; return $("hackBox").classList.add("hidden"); }
+    if (cmd === "points") return admin("points", { team: +b.dataset.arg, amt: +$("hackAmt").value });
+    if (cmd === "end" && !confirmEnd(b)) return;
+    admin(cmd, b.dataset.arg);
+  });
+  // "End game now" needs a second click so it isn't hit by accident
+  function confirmEnd(b) {
+    if (b.dataset.armed) return true;
+    b.dataset.armed = "1"; b.textContent = "Click again to end"; return false;
+  }
+  // Typing "hack" anywhere (even when it's not your turn) also opens the panel
+  let typed = "";
+  document.addEventListener("keydown", (e) => {
+    if (e.target.matches("input, select, textarea") || e.key.length !== 1) return;
+    typed = (typed + e.key.toLowerCase()).slice(-4);
+    if (typed === "hack" && !$("game").classList.contains("hidden")) openHack();
+  });
   $("nextBtn").onclick = () => send({ t: "next" });
   $("againBtn").onclick = () => send({ t: "next" });
   $("startBtn").onclick = () => { if (state.teams[2].connected) { startRound(); commit(); } };
