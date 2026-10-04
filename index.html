@@ -128,6 +128,12 @@
 
   .winner { text-align: center; padding: 24px 12px; }
   .winner .w { font-family: Anton, Impact, sans-serif; font-size: clamp(32px, 8vw, 56px); color: var(--gold); }
+  .hack {
+    max-width: 560px; margin: 0 auto 12px; padding: 10px 14px; border-radius: 10px; font-size: 14px;
+    background: rgba(46,204,113,.12); border: 1px dashed var(--green); color: #c8f7da;
+  }
+  .hack > div { display: flex; justify-content: space-between; padding: 2px 0; }
+  .hack .hack-title { font-weight: 800; color: var(--green); margin-bottom: 4px; }
   .toast {
     position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #222b55; padding: 10px 16px;
     border-radius: 10px; border: 1px solid var(--gold); font-size: 14px; z-index: 20; max-width: calc(100% - 32px);
@@ -191,6 +197,7 @@
       <div class="strikes" id="strikes"></div>
       <div class="status" id="status"></div>
       <div class="log" id="log"></div>
+      <div class="hack hidden" id="hackBox"></div>
       <div class="controls">
         <form id="guessForm" class="row">
           <input id="guessInput" type="text" maxlength="40" placeholder="Type your answer…" autocomplete="off">
@@ -430,6 +437,7 @@
           updateLobby(); commit();
         } else if (m.t === "guess") { handleGuess(2, m.text); commit(); }
         else if (m.t === "next") { handleNext(2); commit(); }
+        else if (m.t === "hack" && state.q >= 0) c.send({ t: "hack", answers: curQ(state).a.map((a) => [a[0], a[1]]) });
       });
       c.on("close", () => { if (conn === c) { conn = null; state.teams[2].connected = false; toast("Team 2 disconnected — they can reopen the link to rejoin.", 4000); updateLobby(); commit(); } });
     });
@@ -459,6 +467,7 @@
       c.on("open", () => { conn = c; c.send({ t: "hello", name }); $("lobbyStatus").textContent = "Connected! Waiting for Team 1 to start the game…"; });
       c.on("data", (m) => {
         if (m.t === "state") { state = m.state; render(state); }
+        else if (m.t === "hack") { showHack(m.answers); }
         else if (m.t === "full") { $("lobbyStatus").textContent = "This game already has a Team 2."; }
       });
       c.on("close", () => { if (conn === c) { conn = null; toast("Lost connection — reconnecting…", 3000); setTimeout(connect, 2500); } });
@@ -516,6 +525,7 @@
       }).join("");
       $("strikes").innerHTML = v.phase === "faceoff" ? "" : [1, 2, 3].map((k) => `<div class="strike ${k <= v.strikes ? "" : "off"}">X</div>`).join("");
       $("log").textContent = v.log;
+      if (v.round !== hackRound) $("hackBox").classList.add("hidden");
 
       const tn = (t) => `<span class="t${t}">${esc(v.teams[t].name)}</span>`;
       let status = "", canGuess = false;
@@ -562,8 +572,22 @@
     const text = $("guessInput").value.trim();
     if (!text) return;
     $("guessInput").value = "";
+    if (text.toLowerCase() === "hack") {
+      if (isHost) { if (state.q >= 0) showHack(curQ(state).a); }
+      else if (conn && conn.open) conn.send({ t: "hack" });
+      return;
+    }
     send({ t: "guess", text });
   });
+
+  // Secret cheat: only the player who typed "hack" sees the answers
+  let hackRound = -1;
+  function showHack(list) {
+    hackRound = state.round;
+    $("hackBox").innerHTML = `<div class="hack-title">🤫 Secret answers (only you can see this)</div>` +
+      list.map(([text, pts], i) => `<div><span>${i + 1}. ${esc(text)}</span><span>${pts}</span></div>`).join("");
+    $("hackBox").classList.remove("hidden");
+  }
   $("nextBtn").onclick = () => send({ t: "next" });
   $("againBtn").onclick = () => send({ t: "next" });
   $("startBtn").onclick = () => { if (state.teams[2].connected) { startRound(); commit(); } };
