@@ -332,12 +332,12 @@
     fire("award", { team });
   }
 
-  function handleGuess(team, text) {
+  function handleGuess(team, text, forced = false) {
     text = String(text || "").trim().slice(0, 40);
     if (!text || !state) return;
     const q = curQ(state), nm = state.teams[team].name;
     // Admin toggles: a jinxed team always misses; a blocked team's steal always fails
-    const forcedMiss = (state.jinx || {})[team] || (state.phase === "steal" && (state.blockSteal || {})[team]);
+    const forcedMiss = forced || (state.jinx || {})[team] || (state.phase === "steal" && (state.blockSteal || {})[team]);
     const idx = forcedMiss ? -1 : matchAnswer(q, text);
 
     if (state.phase === "faceoff") {
@@ -414,6 +414,11 @@
       award(team, "Round over!");
     } else if (cmd === "skip" && state.phase !== "lobby" && state.phase !== "gameOver") {
       state.round--; startRound();
+    } else if (cmd === "fart" && canGuess(state, other(team))) {
+      // Their screen "types" farts, then it's submitted as a guaranteed miss
+      const victim = other(team), round = state.round;
+      fire("fart", { team: victim });
+      setTimeout(() => { if (state.round === round) { handleGuess(victim, "farts", true); commit(); } }, 1400);
     } else if (cmd === "jinx" || cmd === "nosteal") {
       const k = cmd === "jinx" ? "jinx" : "blockSteal";
       state[k] = state[k] || {};
@@ -422,6 +427,7 @@
       state.phase = "gameOver"; fire("win");
     }
   }
+  const canGuess = (s, t) => (s.phase === "faceoff" && !s.faceoff[t]) || (s.phase === "play" && s.control === t) || (s.phase === "steal" && s.control !== t);
   const hackData = () => { const q = curQ(state); return { key: state.round + "|" + q.q, answers: q.a.map((a) => [a[0], a[1]]), fake: (window.DECOYS || {})[q.cat] || [] }; };
 
   function handleNext(team) {
@@ -603,8 +609,18 @@
         else if (e.type === "strike") { sfx.buzz(); bigX(e.count); }
         else if (e.type === "award") sfx.win();
         else if (e.type === "win") sfx.win();
+        else if (e.type === "fart" && e.team === myTeam) ghostType("farts");
       }
     }
+  }
+
+  // Makes the answer box type by itself, then "press enter" (the host submits the guess)
+  function ghostType(word) {
+    const inp = $("guessInput"), btn = $("guessBtn");
+    inp.value = ""; inp.disabled = btn.disabled = true;
+    [...word].forEach((ch, i) => setTimeout(() => { inp.value += ch; }, 200 + i * 180));
+    setTimeout(() => { btn.style.transform = "scale(.9)"; }, 200 + word.length * 180);
+    setTimeout(() => { inp.value = ""; inp.disabled = btn.disabled = false; btn.style.transform = ""; }, 1450);
   }
 
   function bigX(count) {
@@ -655,6 +671,7 @@
         ${btn("skip", "Skip question", v.phase !== "lobby")}${btn("end", "End game now", v.phase !== "lobby")}
         ${btn("nosteal", `Block their steal: ${(v.blockSteal || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
         ${btn("jinx", `Jinx (they always miss): ${(v.jinx || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
+        ${btn("fart", "💨 Fart attack (on their turn)", canGuess(v, other(myTeam)))}
       </div>`;
     box.classList.remove("hidden");
   }
@@ -672,6 +689,12 @@
     if (b.dataset.armed) return true;
     b.dataset.armed = "1"; b.textContent = "Click again to end"; return false;
   }
+  // On phones: tap the logo 5 times quickly
+  let taps = [];
+  document.querySelector(".logo").addEventListener("click", () => {
+    const now = Date.now(); taps = taps.filter((t) => now - t < 2000).concat(now);
+    if (taps.length >= 5 && !$("game").classList.contains("hidden")) { taps = []; openHack(); }
+  });
   // Typing "hack" anywhere (even when it's not your turn) also opens the panel
   let typed = "";
   document.addEventListener("keydown", (e) => {
