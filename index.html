@@ -698,7 +698,7 @@
   // Typing "hack" anywhere (even when it's not your turn) also opens the panel
   let typed = "";
   document.addEventListener("keydown", (e) => {
-    if (e.target.matches("input, select, textarea") || e.key.length !== 1) return;
+    if ((e.target.closest && e.target.closest("input, select, textarea")) || !e.key || e.key.length !== 1) return;
     typed = (typed + e.key.toLowerCase()).slice(-4);
     if (typed === "hack" && !$("game").classList.contains("hidden")) openHack();
   });
