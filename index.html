@@ -332,12 +332,27 @@
     fire("award", { team });
   }
 
+  // Victim's screen "types" farts, then it's submitted as a guaranteed miss
+  const fartPending = {};
+  function fartAttack(victim) {
+    if (fartPending[victim]) return;
+    fartPending[victim] = true;
+    const round = state.round;
+    fire("fart", { team: victim });
+    setTimeout(() => {
+      fartPending[victim] = false;
+      if (state.round === round && canGuess(state, victim)) { handleGuess(victim, "farts", true); commit(); }
+    }, 1400);
+  }
+
   function handleGuess(team, text, forced = false) {
     text = String(text || "").trim().slice(0, 40);
-    if (!text || !state) return;
+    if (!text || !state || (!forced && fartPending[team])) return;
+    // Jinxed: whatever they typed, their device types "farts" instead
+    if (!forced && (state.jinx || {})[team] && canGuess(state, team)) return fartAttack(team);
     const q = curQ(state), nm = state.teams[team].name;
-    // Admin toggles: a jinxed team always misses; a blocked team's steal always fails
-    const forcedMiss = forced || (state.jinx || {})[team] || (state.phase === "steal" && (state.blockSteal || {})[team]);
+    // Admin toggle: a blocked team's steal always fails
+    const forcedMiss = forced || (state.phase === "steal" && (state.blockSteal || {})[team]);
     const idx = forcedMiss ? -1 : matchAnswer(q, text);
 
     if (state.phase === "faceoff") {
@@ -415,10 +430,7 @@
     } else if (cmd === "skip" && state.phase !== "lobby" && state.phase !== "gameOver") {
       state.round--; startRound();
     } else if (cmd === "fart" && canGuess(state, other(team))) {
-      // Their screen "types" farts, then it's submitted as a guaranteed miss
-      const victim = other(team), round = state.round;
-      fire("fart", { team: victim });
-      setTimeout(() => { if (state.round === round) { handleGuess(victim, "farts", true); commit(); } }, 1400);
+      fartAttack(other(team));
     } else if (cmd === "jinx" || cmd === "nosteal") {
       const k = cmd === "jinx" ? "jinx" : "blockSteal";
       state[k] = state[k] || {};
@@ -670,7 +682,7 @@
         ${btn("double", "Double the bank")}${btn("win", "Win this round")}
         ${btn("skip", "Skip question", v.phase !== "lobby")}${btn("end", "End game now", v.phase !== "lobby")}
         ${btn("nosteal", `Block their steal: ${(v.blockSteal || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
-        ${btn("jinx", `Jinx (they always miss): ${(v.jinx || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
+        ${btn("jinx", `Jinx (their guesses become farts):${(v.jinx || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
         ${btn("fart", "💨 Fart attack (on their turn)", canGuess(v, other(myTeam)))}
       </div>`;
     box.classList.remove("hidden");
