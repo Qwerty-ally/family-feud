@@ -162,6 +162,7 @@
     background: linear-gradient(var(--tile), var(--tile2)); border: 4px solid var(--gold); border-radius: 16px;
     padding: 24px; max-width: 420px; width: 100%; text-align: center; font-size: 22px; font-weight: 800; word-wrap: break-word;
   }
+  .leave { position: fixed; top: 12px; right: 12px; z-index: 12; padding: 8px 14px; font-size: 14px; }
   .toast {
     position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #222b55; padding: 10px 16px;
     border-radius: 10px; border: 1px solid var(--gold); font-size: 14px; z-index: 20; max-width: calc(100% - 32px);
@@ -177,6 +178,7 @@
 </head>
 <body>
 <div class="wrap">
+  <button id="leaveBtn" class="secondary leave hidden">Leave game</button>
   <h1 class="logo">FAMILY FEUD</h1>
 
   <!-- Setup screen -->
@@ -550,6 +552,7 @@
         else if (m.t === "next") { handleNext(2); commit(); }
         else if (m.t === "hack" && state.q >= 0) c.send({ t: "hack", ...hackData() });
         else if (m.t === "admin") { handleAdmin(2, m.cmd, m.arg); commit(); }
+        else if (m.t === "leave") { toast(`${state.teams[2].name} left the game. Your link still works if someone else wants to join.`, 5000); c.close(); }
       });
       c.on("close", () => { if (conn === c) { conn = null; state.teams[2].connected = false; toast("Team 2 disconnected — they can reopen the link to rejoin.", 4000); updateLobby(); commit(); } });
     });
@@ -580,14 +583,15 @@
       c.on("data", (m) => {
         if (m.t === "state") { state = m.state; render(state); }
         else if (m.t === "hack") { hack.data = m; renderHack(state); }
+        else if (m.t === "left") { left = true; popup("Team 1 left the game. Click OK to start your own game.", () => (location.href = location.pathname)); }
         else if (m.t === "full") { $("lobbyStatus").textContent = "This game already has a Team 2."; }
       });
-      c.on("close", () => { if (conn === c) { conn = null; toast("Lost connection — reconnecting…", 3000); setTimeout(connect, 2500); } });
+      c.on("close", () => { if (conn === c && !left) { conn = null; toast("Lost connection — reconnecting…", 3000); setTimeout(connect, 2500); } });
     };
     peer.on("open", connect);
     peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
     peer.on("error", (e) => {
-      if (e.type === "peer-unavailable") { $("lobbyStatus").textContent = "Can't find that game. Is Team 1's page still open? Retrying…"; setTimeout(connect, 3000); }
+      if (e.type === "peer-unavailable") { if (left) return; $("lobbyStatus").textContent = "Can't find that game. Is Team 1's page still open? Retrying…"; setTimeout(connect, 3000); }
       else toast("Connection error: " + e.type, 4000);
     });
   }
@@ -599,7 +603,26 @@
   }
 
   // ---------- Rendering ----------
-  function show(which) { for (const id of ["setup", "lobby", "game"]) $(id).classList.toggle("hidden", id !== which); }
+  function show(which) {
+    for (const id of ["setup", "lobby", "game"]) $(id).classList.toggle("hidden", id !== which);
+    $("leaveBtn").classList.toggle("hidden", which === "setup");
+  }
+
+  // ---------- Leaving ----------
+  let left = false;
+  $("leaveBtn").onclick = () => {
+    const b = $("leaveBtn");
+    if (!b.dataset.armed) {
+      b.dataset.armed = "1"; b.textContent = "Click again to leave";
+      setTimeout(() => { delete b.dataset.armed; b.textContent = "Leave game"; }, 3000);
+      return;
+    }
+    left = true;
+    try { sessionStorage.removeItem("ffeud-host"); } catch (e) {}
+    try { if (conn && conn.open) conn.send({ t: isHost ? "left" : "leave" }); } catch (e) {}
+    // Give the goodbye message a moment to send, then go back to the start screen
+    setTimeout(() => { try { peer && peer.destroy(); } catch (e) {} location.href = location.pathname; }, 400);
+  };
 
   function render(v) {
     if (v.phase === "lobby") { if (isHost) updateLobby(); return; }
@@ -698,10 +721,12 @@
       if (kind === "freeze") { $("guessInput").disabled = $("guessBtn").disabled = false; $("frozen").classList.add("hidden"); }
     }, ms);
   }
-  function popup(text) {
+  let popupDone = null;
+  function popup(text, onOk) {
+    popupDone = onOk || null;
     $("popupText").textContent = text; $("popup").classList.remove("hidden"); tone(660, 0.2, "sine", 0.2);
   }
-  $("popupOk").onclick = () => $("popup").classList.add("hidden");
+  $("popupOk").onclick = () => { $("popup").classList.add("hidden"); if (popupDone) popupDone(); };
 
   function bigX(count) {
     const el = $("bigX"); el.textContent = "X".repeat(count || 1);
