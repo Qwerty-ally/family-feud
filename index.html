@@ -516,7 +516,7 @@
   }
 
   function commit() {
-    try { sessionStorage.setItem("ffeud-host", JSON.stringify({ id: peer && peer.id, state })); } catch (e) {}
+    if (!left) try { sessionStorage.setItem("ffeud-host", JSON.stringify({ id: peer && peer.id, state })); } catch (e) {}
     const v = view(state);
     render(v);
     if (conn && conn.open) conn.send({ t: "state", state: v });
@@ -552,9 +552,9 @@
         else if (m.t === "next") { handleNext(2); commit(); }
         else if (m.t === "hack" && state.q >= 0) c.send({ t: "hack", ...hackData() });
         else if (m.t === "admin") { handleAdmin(2, m.cmd, m.arg); commit(); }
-        else if (m.t === "leave") { toast(`${state.teams[2].name} left the game. Your link still works if someone else wants to join.`, 5000); c.close(); }
+        else if (m.t === "leave") { c.leftOnPurpose = true; toast(`${state.teams[2].name} left the game. Your link still works if someone else wants to join.`, 5000); c.close(); }
       });
-      c.on("close", () => { if (conn === c) { conn = null; state.teams[2].connected = false; toast("Team 2 disconnected — they can reopen the link to rejoin.", 4000); updateLobby(); commit(); } });
+      c.on("close", () => { if (conn === c && !left) { conn = null; state.teams[2].connected = false; if (!c.leftOnPurpose) toast("Team 2 disconnected — they can reopen the link to rejoin.", 4000); updateLobby(); commit(); } });
     });
     peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
     peer.on("error", (e) => {
