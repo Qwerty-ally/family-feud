@@ -141,6 +141,8 @@
   .hack-traps { display: flex; flex-wrap: wrap; gap: 6px; }
   .hack-traps span { background: rgba(227,38,47,.18); border: 1px solid var(--red); color: #ffc9cc; padding: 2px 8px; border-radius: 6px; }
   .hack input[type=number] { flex: 1; min-width: 0; padding: 8px; font-size: 15px; border-radius: 8px; border: 2px solid #2b4bb5; background: #071340; color: #fff; }
+  .hack-target { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .hack-target button.on { outline: 3px solid var(--green); }
   .hack-cmds { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .hack select { flex: 1; min-width: 0; padding: 8px; font-size: 15px; }
   .hack input[type=text] { flex: 1; min-width: 0; padding: 8px; font-size: 15px; }
@@ -475,7 +477,9 @@
   }
 
   // Secret admin commands (unlocked by typing "hack")
-  function handleAdmin(team, cmd, arg) {
+  // target = which team the attacks/pranks hit (defaults to the other team; can be yourself for testing)
+  function handleAdmin(team, cmd, arg, target) {
+    const victim = target === 1 || target === 2 ? target : other(team);
     const live = ["faceoff", "play", "steal"].includes(state.phase);
     if (cmd === "points") {
       const t = arg && arg.team === 2 ? 2 : 1, amt = Math.max(-9999, Math.min(9999, Math.round(+(arg && arg.amt) || 0)));
@@ -497,41 +501,41 @@
       award(team, "Round over!");
     } else if (cmd === "skip" && state.phase !== "lobby" && state.phase !== "gameOver") {
       state.round--; startRound();
-    } else if (cmd === "fart" && canGuess(state, other(team))) {
-      fartAttack(other(team));
-    } else if (cmd === "giveStrike" && state.phase === "play" && state.control === other(team)) {
-      strike(other(team), `${state.teams[other(team)].name}: `);
+    } else if (cmd === "fart" && canGuess(state, victim)) {
+      fartAttack(victim);
+    } else if (cmd === "giveStrike" && state.phase === "play" && state.control === victim) {
+      strike(victim, `${state.teams[victim].name}: `);
     } else if (cmd === "swap") {
       [state.teams[1].score, state.teams[2].score] = [state.teams[2].score, state.teams[1].score];
     } else if (cmd === "zero") {
-      state.teams[other(team)].score = 0;
+      state.teams[victim].score = 0;
     } else if (cmd === "triple" && live) {
       state.bank *= 3;
     } else if (cmd === "pick" && state.phase !== "lobby" && state.phase !== "gameOver") {
       state.round--; startRound(+arg);
     } else if (cmd === "rename") {
       const name = String(arg || "").trim().slice(0, 20);
-      if (name) state.teams[other(team)].name = name;
+      if (name) state.teams[victim].name = name;
     } else if (cmd === "msg") {
       const text = String(arg || "").trim().slice(0, 120);
-      if (text) fire("msg", { team: other(team), text });
+      if (text) fire("msg", { team: victim, text });
     } else if (cmd === "rob") {
-      state.teams[team].score += state.teams[other(team)].score; state.teams[other(team)].score = 0;
+      state.teams[other(victim)].score += state.teams[victim].score; state.teams[victim].score = 0;
     } else if (cmd === "bankrupt" && live) {
       state.bank = 0;
-    } else if (cmd === "clock" && canGuess(state, other(team))) {
-      startClock(other(team));
+    } else if (cmd === "clock" && canGuess(state, victim)) {
+      startClock(victim);
     } else if (cmd === "backwards") {
       state.backwards = state.backwards || {};
-      state.backwards[other(team)] = !state.backwards[other(team)];
+      state.backwards[victim] = !state.backwards[victim];
     } else if (PRANKS[cmd]) {
       // Screen pranks play out on the victim's device; freeze also blocks their guesses here
-      if (BLOCKING[cmd]) frozenUntil[other(team)] = Date.now() + PRANKS[cmd];
-      fire("prank", { team: other(team), kind: cmd, ms: PRANKS[cmd] });
+      if (BLOCKING[cmd]) frozenUntil[victim] = Date.now() + PRANKS[cmd];
+      fire("prank", { team: victim, kind: cmd, ms: PRANKS[cmd] });
     } else if (cmd === "jinx" || cmd === "nosteal") {
       const k = cmd === "jinx" ? "jinx" : "blockSteal";
       state[k] = state[k] || {};
-      state[k][other(team)] = !state[k][other(team)];
+      state[k][victim] = !state[k][victim];
     } else if (cmd === "end" && state.phase !== "lobby" && state.phase !== "gameOver") {
       state.phase = "gameOver"; fire("win");
     }
@@ -597,7 +601,7 @@
         } else if (m.t === "guess") { handleGuess(2, m.text); commit(); }
         else if (m.t === "next") { handleNext(2); commit(); }
         else if (m.t === "hack" && state.q >= 0) c.send({ t: "hack", ...hackData() });
-        else if (m.t === "admin") { handleAdmin(2, m.cmd, m.arg); commit(); }
+        else if (m.t === "admin") { handleAdmin(2, m.cmd, m.arg, m.target); commit(); }
         else if (m.t === "leave") { c.leftOnPurpose = true; toast(`${state.teams[2].name} left the game. Your link still works if someone else wants to join.`, 5000); c.close(); }
       });
       c.on("close", () => { if (conn === c && !left) { conn = null; state.teams[2].connected = false; if (!c.leftOnPurpose) toast("Team 2 disconnected — they can reopen the link to rejoin.", 4000); updateLobby(); commit(); } });
@@ -848,11 +852,12 @@
   });
 
   // ---------- Secret "hack" admin panel (only the player who typed it sees it) ----------
-  const hack = { open: false, data: null, asked: "" };
+  const hack = { open: false, data: null, asked: "", target: "them" };
+  const targetTeam = () => (hack.target === "me" ? myTeam : other(myTeam));
   function openHack() { hack.open = true; renderHack(isHost ? view(state) : state); }
   function admin(cmd, arg) {
-    if (isHost) { handleAdmin(1, cmd, arg); commit(); }
-    else if (conn && conn.open) conn.send({ t: "admin", cmd, arg });
+    if (isHost) { handleAdmin(1, cmd, arg, targetTeam()); commit(); }
+    else if (conn && conn.open) conn.send({ t: "admin", cmd, arg, target: targetTeam() });
   }
   function renderHack(v) {
     const box = $("hackBox");
@@ -865,10 +870,15 @@
     if (box.contains(document.activeElement) && document.activeElement.matches("input, select") && !box.classList.contains("hidden")) return;
     const live = ["faceoff", "play", "steal"].includes(v.phase), keep = (id, d) => ($(id) ? $(id).value : d);
     const amt = keep("hackAmt", "50"), msg = keep("hackMsg", ""), nm = keep("hackName", "");
-    const them = esc(v.teams[other(myTeam)].name);
+    const tgt = targetTeam(), them = esc(v.teams[tgt].name);
     const btn = (cmd, label, ok = live) => `<button class="secondary" data-cmd="${cmd}" ${ok ? "" : "disabled"}>${label}</button>`;
     box.innerHTML = `
       <div class="hack-head"><span class="hack-title">🤫 Admin panel (only you can see this)</span><button class="secondary hack-x" data-cmd="close">✕</button></div>
+      <div class="hack-sec">Target for attacks &amp; pranks</div>
+      <div class="hack-target">
+        <button data-cmd="target" data-arg="them" class="${hack.target === "them" ? "on" : "secondary"}">😈 ${esc(v.teams[other(myTeam)].name)}</button>
+        <button data-cmd="target" data-arg="me" class="${hack.target === "me" ? "on" : "secondary"}">🧪 Me (test on myself)</button>
+      </div>
       <div class="hack-sec">Answers</div>
       ${hack.data.answers.map(([text, pts], i) => `<div class="hack-row"><span>${i + 1}. ${esc(text)} <b>${pts}</b></span>
         ${v.answers[i] && v.answers[i].revealed ? `<span class="muted">on board</span>` : `<button class="secondary" data-cmd="reveal" data-arg="${i}" ${live ? "" : "disabled"}>Reveal</button>`}</div>`).join("")}
@@ -882,10 +892,10 @@
         ${btn("strikes", "Clear strikes", v.phase === "play" || v.phase === "steal")}${btn("control", "Take control")}
         ${btn("double", "Double the bank")}${btn("win", "Win this round")}
         ${btn("skip", "Skip question", v.phase !== "lobby")}${btn("end", "End game now", v.phase !== "lobby")}
-        ${btn("nosteal", `Block their steal: ${(v.blockSteal || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
-        ${btn("jinx", `Jinx (their guesses become farts): ${(v.jinx || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
-        ${btn("fart", "💨 Fart attack (on their turn)", canGuess(v, other(myTeam)))}
-        ${btn("giveStrike", `❌ Give ${them} a strike`, v.phase === "play" && v.control === other(myTeam))}
+        ${btn("nosteal", `Block their steal: ${(v.blockSteal || {})[tgt] ? "ON" : "OFF"}`, true)}
+        ${btn("jinx", `Jinx (their guesses become farts): ${(v.jinx || {})[tgt] ? "ON" : "OFF"}`, true)}
+        ${btn("fart", "💨 Fart attack (on their turn)", canGuess(v, tgt))}
+        ${btn("giveStrike", `❌ Give ${them} a strike`, v.phase === "play" && v.control === tgt)}
         ${btn("triple", "Triple the bank")}${btn("swap", "🔄 Swap scores", true)}
         ${btn("zero", `Reset ${them}'s score to 0`, true)}
       </div>
@@ -899,7 +909,7 @@
       <div class="hack-sec">😈 Downright EVIL</div>
       <div class="hack-cmds">
         ${btn("rob", `💰 Rob ALL of ${them}'s points`, true)}${btn("bankrupt", "💸 Bankrupt the bank")}
-        ${btn("clock", "⏱️ 5-second shot clock", canGuess(v, other(myTeam)))}${btn("backwards", `🔁 Backwards keyboard: ${(v.backwards || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
+        ${btn("clock", "⏱️ 5-second shot clock", canGuess(v, tgt))}${btn("backwards", `🔁 Backwards keyboard: ${(v.backwards || {})[tgt] ? "ON" : "OFF"}`, true)}
         ${btn("fakeWin", "🏆 Fake “YOU WIN!” screen", true)}${btn("fakeDC", "📡 Fake disconnect (8s)", true)}
         ${btn("runaway", "🏃 Runaway Guess button", true)}${btn("scramble", "🔀 Scramble their board", true)}
         ${btn("fakeScore", "📉 Show them a -9,999 score", true)}${btn("invisible", "👻 Invisible typing", true)}
@@ -907,7 +917,7 @@
       </div>
       <div class="hack-sec">Pop-up message on their screen</div>
       <div class="row"><input id="hackMsg" type="text" maxlength="120" placeholder="e.g. Your answer was SO close…" value="${esc(msg)}"><button data-cmd="msg">Send</button></div>
-      <div class="hack-sec">Rename the other team</div>
+      <div class="hack-sec">Rename ${them}</div>
       <div class="row"><input id="hackName" type="text" maxlength="20" placeholder="e.g. Team Stinky" value="${esc(nm)}"><button data-cmd="rename">Rename</button></div>
       <div class="hack-sec">Switch to a different question</div>
       <div class="row"><select id="hackPick">${QUESTIONS.map((q, i) => `<option value="${i}">${esc(q.cat)}</option>`).join("")}</select>
@@ -919,6 +929,7 @@
     if (!b) return;
     const cmd = b.dataset.cmd;
     if (cmd === "close") { hack.open = false; return $("hackBox").classList.add("hidden"); }
+    if (cmd === "target") { hack.target = b.dataset.arg; return renderHack(lastView); }
     if (cmd === "points") return admin("points", { team: +b.dataset.arg, amt: +$("hackAmt").value });
     if (cmd === "end" && !confirmEnd(b)) return;
     if (cmd === "msg") { admin("msg", $("hackMsg").value); $("hackMsg").value = ""; return toast("Message sent 😈"); }
