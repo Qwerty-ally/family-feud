@@ -169,7 +169,15 @@
     font-family: Anton, Impact, sans-serif; font-size: 44px; padding: 6px 22px; border-radius: 14px; border: 3px solid #fff;
     box-shadow: 0 0 30px rgba(227,38,47,.8);
   }
-  body.cursed-backwards #guessInput { transform: scaleX(-1); }
+  body.cursed-backwards #guessInput, body.cursed-backwards .key-ghost { transform: scaleX(-1); }
+  #guessForm { position: relative; }
+  .key-ghost {
+    display: none; position: absolute; pointer-events: none; align-items: center; padding: 0 16px; font-size: 17px;
+    color: #fff; white-space: pre; overflow: hidden; z-index: 1;
+  }
+  body.cursed-keys .key-ghost { display: flex; }
+  body.cursed-keys #guessInput { color: transparent; caret-color: #fff; }
+  body.prank-invisible .key-ghost { visibility: hidden; }
   body.prank-invisible #guessInput { color: transparent; caret-color: transparent; }
   #guessBtn { transition: left .15s, top .15s; }
   .frozen {
@@ -250,6 +258,7 @@
       <div class="hack hidden" id="hackBox"></div>
       <div class="controls">
         <form id="guessForm" class="row">
+          <div id="keyGhost" class="key-ghost"></div>
           <input id="guessInput" type="text" maxlength="40" placeholder="Type your answer…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
           <button type="submit" id="guessBtn">Guess</button>
         </form>
@@ -800,7 +809,7 @@
   function ghostType(word) {
     const inp = $("guessInput"), btn = $("guessBtn");
     inp.value = ""; inp.disabled = btn.disabled = true;
-    [...word].forEach((ch, i) => setTimeout(() => { inp.value += ch; }, 200 + i * 180));
+    [...word].forEach((ch, i) => setTimeout(() => { inp.value += ch; updateKeyGhost(); }, 200 + i * 180));
     setTimeout(() => { btn.style.transform = "scale(.9)"; }, 200 + word.length * 180);
     setTimeout(() => { inp.value = ""; inp.disabled = btn.disabled = false; btn.style.transform = ""; }, 1450);
   }
@@ -881,7 +890,7 @@
   $("guessBtn").addEventListener("pointerenter", dodge);
   $("guessBtn").addEventListener("pointerdown", (e) => { if (dodge()) e.preventDefault(); });
   // Scrambled keyboard: every letter you type comes out as a different (but consistent) letter
-  let keyMap = null, keyPrev = "";
+  let keyMap = null;
   function makeKeyMap(seed) {
     let x = seed >>> 0;
     const rnd = () => { x = (x + 0x6d2b79f5) >>> 0; let t = x; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -891,19 +900,16 @@
     const m = { seed }; abc.forEach((c, i) => (m[c] = out[i])); return m;
   }
   const scrambleText = (t) => [...t].map((c) => { const l = c.toLowerCase(), r = keyMap[l]; return r ? (c === l ? r : r.toUpperCase()) : c; }).join("");
-  $("guessInput").addEventListener("beforeinput", (e) => {
-    if (!keyMap || e.inputType !== "insertText" || !e.data) return;
-    e.preventDefault();
-    const el = e.target;
-    el.setRangeText(scrambleText(e.data), el.selectionStart, el.selectionEnd, "end");
-    keyPrev = el.value;
-  });
-  // Fallback for phone keyboards that skip beforeinput: scramble whatever got appended
-  $("guessInput").addEventListener("input", (e) => {
-    const el = e.target;
-    if (keyMap && el.value.length > keyPrev.length && el.value.startsWith(keyPrev)) el.value = keyPrev + scrambleText(el.value.slice(keyPrev.length));
-    keyPrev = el.value;
-  });
+  // The real box keeps what was actually typed (so every keyboard, including phones with autocorrect, behaves normally)
+  // but its text is hidden; a layer on top shows the scrambled letters, and the scrambled version is what gets submitted.
+  function updateKeyGhost() {
+    const inp = $("guessInput"), gh = $("keyGhost");
+    document.body.classList.toggle("cursed-keys", !!keyMap);
+    if (!keyMap) return;
+    gh.textContent = scrambleText(inp.value);
+    Object.assign(gh.style, { left: inp.offsetLeft + "px", top: inp.offsetTop + "px", width: inp.offsetWidth + "px", height: inp.offsetHeight + "px" });
+  }
+  $("guessInput").addEventListener("input", updateKeyGhost);
 
   // Visual curses applied after every render
   let lastView = null;
@@ -911,12 +917,17 @@
     lastView = v;
     const seed = (v.scrambleKeys || {})[myTeam];
     keyMap = seed ? (keyMap && keyMap.seed === seed ? keyMap : makeKeyMap(seed)) : null;
+    updateKeyGhost();
     document.body.classList.toggle("cursed-backwards", !!(v.backwards || {})[myTeam]);
     if (document.body.classList.contains("prank-fakeScore")) $("team" + myTeam).querySelector(".pts").textContent = "-9,999";
     if (document.body.classList.contains("prank-scramble"))
-      document.querySelectorAll("#board .txt, #question").forEach((el) => {
+    {
+      document.querySelectorAll("#board .txt, #question, .team .name").forEach((el) => {
         el.textContent = el.textContent.split(" ").map((w) => [...w].sort(() => Math.random() - 0.5).join("")).join(" ");
       });
+      const nums = [...document.querySelectorAll("#board .num")], vals = nums.map((n) => n.textContent).sort(() => Math.random() - 0.5);
+      nums.forEach((n, i) => (n.textContent = vals[i]));
+    }
     if (!document.body.classList.contains("prank-runaway")) { $("guessBtn").style.left = $("guessBtn").style.top = ""; }
   }
 
@@ -929,12 +940,12 @@
   $("guessForm").addEventListener("submit", (e) => {
     e.preventDefault();
     if (dodge()) return;
-    keyPrev = "";
     const text = $("guessInput").value.trim();
     if (!text) return;
     $("guessInput").value = "";
+    updateKeyGhost();
     if (text.toLowerCase() === "hack") return openHack();
-    send({ t: "guess", text });
+    send({ t: "guess", text: keyMap ? scrambleText(text) : text });
   });
 
   // ---------- Secret "hack" admin panel (only the player who typed it sees it) ----------
