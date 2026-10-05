@@ -142,6 +142,26 @@
   .hack-traps span { background: rgba(227,38,47,.18); border: 1px solid var(--red); color: #ffc9cc; padding: 2px 8px; border-radius: 6px; }
   .hack input[type=number] { flex: 1; min-width: 0; padding: 8px; font-size: 15px; border-radius: 8px; border: 2px solid #2b4bb5; background: #071340; color: #fff; }
   .hack-cmds { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .hack select { flex: 1; min-width: 0; padding: 8px; font-size: 15px; }
+  .hack input[type=text] { flex: 1; min-width: 0; padding: 8px; font-size: 15px; }
+  body.prank-flip .wrap { transform: rotate(180deg); }
+  .wrap { transition: transform .6s, filter .6s; }
+  body.prank-blackout #board { filter: brightness(0); }
+  body.prank-shake .wrap { animation: quake .12s infinite; }
+  @keyframes quake { 0% { transform: translate(0,0) rotate(0); } 25% { transform: translate(-8px,4px) rotate(-1deg); } 50% { transform: translate(6px,-6px) rotate(1deg); } 75% { transform: translate(-4px,-3px) rotate(0); } 100% { transform: translate(5px,5px) rotate(1deg); } }
+  body.prank-rainbow .wrap { animation: rainbow 1.5s linear infinite; }
+  @keyframes rainbow { to { filter: hue-rotate(360deg); } }
+  body.prank-tiny .wrap { transform: scale(.35); transform-origin: top center; }
+  .frozen {
+    position: fixed; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center; pointer-events: all;
+    background: rgba(160, 220, 255, .35); backdrop-filter: blur(3px); font-family: Anton, Impact, sans-serif;
+    font-size: clamp(40px, 12vw, 110px); color: #e8f8ff; text-shadow: 0 0 20px #4fc3ff;
+  }
+  .popup { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.6); padding: 16px; }
+  .popup-card {
+    background: linear-gradient(var(--tile), var(--tile2)); border: 4px solid var(--gold); border-radius: 16px;
+    padding: 24px; max-width: 420px; width: 100%; text-align: center; font-size: 22px; font-weight: 800; word-wrap: break-word;
+  }
   .toast {
     position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #222b55; padding: 10px 16px;
     border-radius: 10px; border: 1px solid var(--gold); font-size: 14px; z-index: 20; max-width: calc(100% - 32px);
@@ -224,6 +244,8 @@
 </div>
 <div class="big-x" id="bigX"></div>
 <div class="toast hidden" id="toast"></div>
+<div class="frozen hidden" id="frozen">🧊 FROZEN 🧊</div>
+<div class="popup hidden" id="popup"><div class="popup-card"><div id="popupText"></div><button id="popupOk" class="mt">OK</button></div></div>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="questions.js"></script>
@@ -308,10 +330,10 @@
   const curQ = (s) => QUESTIONS[s.q];
   const fire = (type, extra = {}) => { state.event = { n: state.event.n + 1, type, ...extra }; };
 
-  function startRound() {
+  function startRound(forceQ) {
     let pool = QUESTIONS.map((_, i) => i).filter((i) => !state.used.includes(i));
     if (!pool.length) { state.used = []; pool = QUESTIONS.map((_, i) => i); }
-    state.q = pool[Math.floor(Math.random() * pool.length)];
+    state.q = forceQ >= 0 && forceQ < QUESTIONS.length ? forceQ : pool[Math.floor(Math.random() * pool.length)];
     state.used.push(state.q);
     state.round++;
     state.revealed = curQ(state).a.map(() => false);
@@ -332,6 +354,9 @@
     fire("award", { team });
   }
 
+  const PRANKS = { freeze: 10000, flip: 10000, blackout: 8000, shake: 2000, fakeX: 1200, rainbow: 8000, tiny: 8000 };
+  const frozenUntil = {};
+
   // Victim's screen "types" farts, then it's submitted as a guaranteed miss
   const fartPending = {};
   function fartAttack(victim) {
@@ -345,9 +370,19 @@
     }, 1400);
   }
 
+  function strike(team, prefix) {
+    state.strikes++;
+    state.log = `${prefix}STRIKE ${state.strikes}!`;
+    if (state.strikes >= 3) {
+      state.phase = "steal";
+      state.log += ` ${state.teams[other(team)].name} gets one guess to steal the bank!`;
+    }
+    fire("strike", { count: state.strikes });
+  }
+
   function handleGuess(team, text, forced = false) {
     text = String(text || "").trim().slice(0, 40);
-    if (!text || !state || (!forced && fartPending[team])) return;
+    if (!text || !state || (!forced && (fartPending[team] || frozenUntil[team] > Date.now()))) return;
     // Jinxed: whatever they typed, their device types "farts" instead
     if (!forced && (state.jinx || {})[team] && canGuess(state, team)) return fartAttack(team);
     const q = curQ(state), nm = state.teams[team].name;
@@ -385,13 +420,7 @@
         if (boardCleared()) return award(team, "Board cleared!");
         fire("ding"); return;
       }
-      state.strikes++;
-      state.log = `${nm}: “${text}” — STRIKE ${state.strikes}!`;
-      if (state.strikes >= 3) {
-        state.phase = "steal";
-        state.log += ` ${state.teams[other(team)].name} gets one guess to steal the bank!`;
-      }
-      fire("strike", { count: state.strikes }); return;
+      return strike(team, `${nm}: “${text}” — `);
     }
 
     if (state.phase === "steal") {
@@ -431,6 +460,26 @@
       state.round--; startRound();
     } else if (cmd === "fart" && canGuess(state, other(team))) {
       fartAttack(other(team));
+    } else if (cmd === "giveStrike" && state.phase === "play" && state.control === other(team)) {
+      strike(other(team), `${state.teams[other(team)].name}: `);
+    } else if (cmd === "swap") {
+      [state.teams[1].score, state.teams[2].score] = [state.teams[2].score, state.teams[1].score];
+    } else if (cmd === "zero") {
+      state.teams[other(team)].score = 0;
+    } else if (cmd === "triple" && live) {
+      state.bank *= 3;
+    } else if (cmd === "pick" && state.phase !== "lobby" && state.phase !== "gameOver") {
+      state.round--; startRound(+arg);
+    } else if (cmd === "rename") {
+      const name = String(arg || "").trim().slice(0, 20);
+      if (name) state.teams[other(team)].name = name;
+    } else if (cmd === "msg") {
+      const text = String(arg || "").trim().slice(0, 120);
+      if (text) fire("msg", { team: other(team), text });
+    } else if (PRANKS[cmd]) {
+      // Screen pranks play out on the victim's device; freeze also blocks their guesses here
+      if (cmd === "freeze") frozenUntil[other(team)] = Date.now() + PRANKS.freeze;
+      fire("prank", { team: other(team), kind: cmd, ms: PRANKS[cmd] });
     } else if (cmd === "jinx" || cmd === "nosteal") {
       const k = cmd === "jinx" ? "jinx" : "blockSteal";
       state[k] = state[k] || {};
@@ -622,6 +671,8 @@
         else if (e.type === "award") sfx.win();
         else if (e.type === "win") sfx.win();
         else if (e.type === "fart" && e.team === myTeam) ghostType("farts");
+        else if (e.type === "prank" && e.team === myTeam) prank(e.kind, e.ms);
+        else if (e.type === "msg" && e.team === myTeam) popup(e.text);
       }
     }
   }
@@ -634,6 +685,23 @@
     setTimeout(() => { btn.style.transform = "scale(.9)"; }, 200 + word.length * 180);
     setTimeout(() => { inp.value = ""; inp.disabled = btn.disabled = false; btn.style.transform = ""; }, 1450);
   }
+
+  // Pranks sent from the other player's admin panel
+  function prank(kind, ms) {
+    if (kind === "fakeX") { sfx.buzz(); return bigX(1); }
+    const cls = "prank-" + kind;
+    document.body.classList.add(cls);
+    if (kind === "freeze") { $("guessInput").disabled = $("guessBtn").disabled = true; $("frozen").classList.remove("hidden"); }
+    clearTimeout(prank["t" + kind]);
+    prank["t" + kind] = setTimeout(() => {
+      document.body.classList.remove(cls);
+      if (kind === "freeze") { $("guessInput").disabled = $("guessBtn").disabled = false; $("frozen").classList.add("hidden"); }
+    }, ms);
+  }
+  function popup(text) {
+    $("popupText").textContent = text; $("popup").classList.remove("hidden"); tone(660, 0.2, "sine", 0.2);
+  }
+  $("popupOk").onclick = () => $("popup").classList.add("hidden");
 
   function bigX(count) {
     const el = $("bigX"); el.textContent = "X".repeat(count || 1);
@@ -664,7 +732,11 @@
     if (isHost) hack.data = hackData();
     else if ((!hack.data || hack.data.key !== key) && hack.asked !== key && conn && conn.open) { hack.asked = key; conn.send({ t: "hack" }); }
     if (!hack.data || hack.data.key !== key) { box.innerHTML = `<div class="hack-title">🤫 Loading secret answers…</div>`; return box.classList.remove("hidden"); }
-    const live = ["faceoff", "play", "steal"].includes(v.phase), amt = $("hackAmt") ? $("hackAmt").value : "50";
+    // Don't rebuild while you're typing in one of the panel's boxes
+    if (box.contains(document.activeElement) && document.activeElement.matches("input, select") && !box.classList.contains("hidden")) return;
+    const live = ["faceoff", "play", "steal"].includes(v.phase), keep = (id, d) => ($(id) ? $(id).value : d);
+    const amt = keep("hackAmt", "50"), msg = keep("hackMsg", ""), nm = keep("hackName", "");
+    const them = esc(v.teams[other(myTeam)].name);
     const btn = (cmd, label, ok = live) => `<button class="secondary" data-cmd="${cmd}" ${ok ? "" : "disabled"}>${label}</button>`;
     box.innerHTML = `
       <div class="hack-head"><span class="hack-title">🤫 Admin panel (only you can see this)</span><button class="secondary hack-x" data-cmd="close">✕</button></div>
@@ -682,9 +754,26 @@
         ${btn("double", "Double the bank")}${btn("win", "Win this round")}
         ${btn("skip", "Skip question", v.phase !== "lobby")}${btn("end", "End game now", v.phase !== "lobby")}
         ${btn("nosteal", `Block their steal: ${(v.blockSteal || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
-        ${btn("jinx", `Jinx (their guesses become farts):${(v.jinx || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
+        ${btn("jinx", `Jinx (their guesses become farts): ${(v.jinx || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
         ${btn("fart", "💨 Fart attack (on their turn)", canGuess(v, other(myTeam)))}
-      </div>`;
+        ${btn("giveStrike", `❌ Give ${them} a strike`, v.phase === "play" && v.control === other(myTeam))}
+        ${btn("triple", "Triple the bank")}${btn("swap", "🔄 Swap scores", true)}
+        ${btn("zero", `Reset ${them}'s score to 0`, true)}
+      </div>
+      <div class="hack-sec">Pranks on ${them}'s screen</div>
+      <div class="hack-cmds">
+        ${btn("freeze", "🧊 Freeze them (10s)", true)}${btn("flip", "🙃 Flip screen upside down", true)}
+        ${btn("blackout", "🌑 Black out their board", true)}${btn("shake", "📳 Earthquake", true)}
+        ${btn("fakeX", "😱 Fake strike scare", true)}${btn("rainbow", "🌈 Rainbow mode", true)}
+        ${btn("tiny", "🔍 Shrink their screen", true)}
+      </div>
+      <div class="hack-sec">Pop-up message on their screen</div>
+      <div class="row"><input id="hackMsg" type="text" maxlength="120" placeholder="e.g. Your answer was SO close…" value="${esc(msg)}"><button data-cmd="msg">Send</button></div>
+      <div class="hack-sec">Rename the other team</div>
+      <div class="row"><input id="hackName" type="text" maxlength="20" placeholder="e.g. Team Stinky" value="${esc(nm)}"><button data-cmd="rename">Rename</button></div>
+      <div class="hack-sec">Switch to a different question</div>
+      <div class="row"><select id="hackPick">${QUESTIONS.map((q, i) => `<option value="${i}">${esc(q.cat)}</option>`).join("")}</select>
+        <button data-cmd="pick" ${v.phase !== "lobby" ? "" : "disabled"}>Switch</button></div>`;
     box.classList.remove("hidden");
   }
   $("hackBox").addEventListener("click", (e) => {
@@ -694,6 +783,9 @@
     if (cmd === "close") { hack.open = false; return $("hackBox").classList.add("hidden"); }
     if (cmd === "points") return admin("points", { team: +b.dataset.arg, amt: +$("hackAmt").value });
     if (cmd === "end" && !confirmEnd(b)) return;
+    if (cmd === "msg") { admin("msg", $("hackMsg").value); $("hackMsg").value = ""; return toast("Message sent 😈"); }
+    if (cmd === "rename") { admin("rename", $("hackName").value); $("hackName").value = ""; return; }
+    if (cmd === "pick") return admin("pick", $("hackPick").value);
     admin(cmd, b.dataset.arg);
   });
   // "End game now" needs a second click so it isn't hit by accident
