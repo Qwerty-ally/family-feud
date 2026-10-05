@@ -141,6 +141,7 @@
   .hack-traps { display: flex; flex-wrap: wrap; gap: 6px; }
   .hack-traps span { background: rgba(227,38,47,.18); border: 1px solid var(--red); color: #ffc9cc; padding: 2px 8px; border-radius: 6px; }
   .hack input[type=number] { flex: 1; min-width: 0; padding: 8px; font-size: 15px; border-radius: 8px; border: 2px solid #2b4bb5; background: #071340; color: #fff; }
+  .hack-undo { width: 100%; background: linear-gradient(#5ee08f, #23a55a) !important; color: #04210f !important; }
   .hack-target { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .hack-target button.on { outline: 3px solid var(--green); }
   .hack-cmds { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -397,13 +398,13 @@
   const frozenUntil = {};
 
   // Victim's screen "types" farts, then it's submitted as a guaranteed miss
-  const fartPending = {};
+  const fartPending = {}, fartTimers = {};
   function fartAttack(victim) {
     if (fartPending[victim]) return;
     fartPending[victim] = true;
     const round = state.round;
     fire("fart", { team: victim });
-    setTimeout(() => {
+    fartTimers[victim] = setTimeout(() => {
       fartPending[victim] = false;
       if (state.round === round && canGuess(state, victim)) { handleGuess(victim, "farts", true); commit(); }
     }, 1400);
@@ -478,7 +479,47 @@
 
   // Secret admin commands (unlocked by typing "hack")
   // target = which team the attacks/pranks hit (defaults to the other team; can be yourself for testing)
+  const ADMIN_LABELS = {
+    points: "Add points", reveal: "Reveal answer", strikes: "Clear strikes", control: "Take control", double: "Double the bank",
+    win: "Win this round", skip: "Skip question", fart: "Fart attack", giveStrike: "Give a strike", swap: "Swap scores",
+    zero: "Reset score", triple: "Triple the bank", pick: "Switch question", rename: "Rename", msg: "Pop-up message",
+    rob: "Rob points", bankrupt: "Bankrupt", clock: "Shot clock", backwards: "Backwards keyboard", keys: "Scrambled keyboard",
+    jinx: "Jinx", nosteal: "Block steal", end: "End game", freeze: "Freeze", flip: "Flip screen", blackout: "Black out board",
+    shake: "Earthquake", fakeX: "Fake strike", rainbow: "Rainbow mode", tiny: "Shrink screen", fakeWin: "Fake win",
+    fakeDC: "Fake disconnect", runaway: "Runaway button", scramble: "Scramble board", fakeScore: "Fake score",
+    airhorn: "Airhorn", spam: "Pop-up spam", invisible: "Invisible typing",
+  };
+  const undoStack = []; // { team, label, victim, snap } — newest last
+  const undoLabel = (t) => { for (let i = undoStack.length - 1; i >= 0; i--) if (undoStack[i].team === t) return undoStack[i].label; return ""; };
+
   function handleAdmin(team, cmd, arg, target) {
+    if (cmd === "undo") return undoLast(team);
+    const before = JSON.stringify(state);
+    runAdmin(team, cmd, arg, target);
+    if (JSON.stringify(state) !== before) {
+      undoStack.push({ team, label: ADMIN_LABELS[cmd] || cmd, victim: target === 1 || target === 2 ? target : other(team), snap: before });
+      if (undoStack.length > 50) undoStack.shift();
+    }
+  }
+
+  // Put the game back the way it was before this player's last command (anything after it is rolled back too)
+  function undoLast(team) {
+    let i = undoStack.length - 1;
+    while (i >= 0 && undoStack[i].team !== team) i--;
+    if (i < 0) return;
+    const { snap, victim } = undoStack[i];
+    undoStack.length = i;
+    const n = state.event.n, online = state.teams[2].connected;
+    state = JSON.parse(snap);
+    state.teams[2].connected = online;
+    state.event = { n: n + 1, type: "undo", team: victim };
+    // Cancel anything still pending on the host for that player
+    frozenUntil[victim] = 0;
+    clearTimeout(fartTimers[victim]); fartPending[victim] = false;
+    if (shotClock && shotClock.team === victim) { clearTimeout(shotClock.t); shotClock = null; }
+  }
+
+  function runAdmin(team, cmd, arg, target) {
     const victim = target === 1 || target === 2 ? target : other(team);
     const live = ["faceoff", "play", "steal"].includes(state.phase);
     if (cmd === "points") {
@@ -562,7 +603,7 @@
     const fo = {};
     for (const t of [1, 2]) fo[t] = s.faceoff[t] ? (s.phase === "faceoff" ? { locked: true } : s.faceoff[t]) : null;
     return {
-      ...s, faceoff: fo, used: undefined,
+      ...s, faceoff: fo, used: undefined, undo: { 1: undoLabel(1), 2: undoLabel(2) },
       question: q ? { cat: q.cat, q: q.q } : null,
       answers: q ? q.a.map((a, i) => (s.revealed[i] || showAll ? { text: a[0], pts: a[1], revealed: s.revealed[i] } : null)) : [],
     };
@@ -750,6 +791,7 @@
         else if (e.type === "fart" && e.team === myTeam) ghostType("farts");
         else if (e.type === "prank" && e.team === myTeam) prank(e.kind, e.ms);
         else if (e.type === "msg" && e.team === myTeam) popup(e.text);
+        else if (e.type === "undo" && e.team === myTeam) clearPranks();
       }
     }
   }
@@ -764,6 +806,19 @@
   }
 
   // Pranks sent from the other player's admin panel
+  const prankTimers = [];
+  const later = (fn, ms) => { const id = setTimeout(fn, ms); prankTimers.push(id); return id; };
+  function clearPranks() {
+    prankTimers.splice(0).forEach(clearTimeout);
+    clearInterval(shotClockUI.i);
+    [...document.body.classList].filter((c) => c.startsWith("prank-")).forEach((c) => document.body.classList.remove(c));
+    ["frozen", "evil", "clock", "popup"].forEach((id) => $(id).classList.add("hidden"));
+    popupDone = null;
+    $("guessInput").disabled = $("guessBtn").disabled = false;
+    $("bigX").classList.remove("show");
+    if (lastView) render(lastView);
+  }
+
   function prank(kind, ms) {
     if (kind === "fakeX") { sfx.buzz(); return bigX(1); }
     if (kind === "airhorn") { for (let i = 0; i < 6; i++) { tone(466, 0.4, "sawtooth", 0.35, i * 0.5); tone(587, 0.4, "square", 0.2, i * 0.5); } return; }
@@ -771,19 +826,19 @@
     if (kind === "clock") return shotClockUI(ms);
     if (kind === "fakeWin") {
       evil("🏆 YOU WIN! 🏆", "win"); sfx.win();
-      setTimeout(() => evil("JUST KIDDING 😈", "kidding"), 3000);
-      return setTimeout(() => evil(null), ms);
+      later(() => evil("JUST KIDDING 😈", "kidding"), 3000);
+      return later(() => evil(null), ms);
     }
     if (kind === "fakeDC") {
       evil("📡 Connection lost<br><small>Reconnecting…</small>", "dc");
       $("guessInput").disabled = $("guessBtn").disabled = true;
-      return setTimeout(() => { evil(null); $("guessInput").disabled = $("guessBtn").disabled = false; }, ms);
+      return later(() => { evil(null); $("guessInput").disabled = $("guessBtn").disabled = false; }, ms);
     }
     const cls = "prank-" + kind;
     document.body.classList.add(cls);
     if (kind === "freeze") { $("guessInput").disabled = $("guessBtn").disabled = true; $("frozen").classList.remove("hidden"); }
     clearTimeout(prank["t" + kind]);
-    prank["t" + kind] = setTimeout(() => {
+    prank["t" + kind] = later(() => {
       document.body.classList.remove(cls);
       if (kind === "freeze") { $("guessInput").disabled = $("guessBtn").disabled = false; $("frozen").classList.add("hidden"); }
       if (lastView) render(lastView);
@@ -804,7 +859,7 @@
   }
   const SPAM = ["Are you sure about that answer?", "Your device has been taken over by 🐸", "Hint: the answer is not what you think", "Did you know? You're losing.",
     "Click OK to continue being bad at this", "Loading better guesses… failed", "This message will self-destruct", "Just kidding. One more.", "OK fine, you can play now 😈"];
-  function spam(i) { if (i < SPAM.length) popup(SPAM[i], () => setTimeout(() => spam(i + 1), 150)); }
+  function spam(i) { if (i < SPAM.length) popup(SPAM[i], () => later(() => spam(i + 1), 150)); }
   function shotClockUI(ms) {
     const el = $("clock"); let left = Math.round(ms / 1000);
     clearInterval(shotClockUI.i);
@@ -905,6 +960,7 @@
     const btn = (cmd, label, ok = live) => `<button class="secondary" data-cmd="${cmd}" ${ok ? "" : "disabled"}>${label}</button>`;
     box.innerHTML = `
       <div class="hack-head"><span class="hack-title">🤫 Admin panel (only you can see this)</span><button class="secondary hack-x" data-cmd="close">✕</button></div>
+      <button class="hack-undo mt" data-cmd="undo" ${v.undo && v.undo[myTeam] ? "" : "disabled"}>↩️ Undo${v.undo && v.undo[myTeam] ? ": " + esc(v.undo[myTeam]) : " (nothing to undo)"}</button>
       <div class="hack-sec">Target for attacks &amp; pranks</div>
       <div class="hack-target">
         <button data-cmd="target" data-arg="them" class="${hack.target === "them" ? "on" : "secondary"}">😈 ${esc(v.teams[other(myTeam)].name)}</button>
