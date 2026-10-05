@@ -152,6 +152,23 @@
   body.prank-rainbow .wrap { animation: rainbow 1.5s linear infinite; }
   @keyframes rainbow { to { filter: hue-rotate(360deg); } }
   body.prank-tiny .wrap { transform: scale(.35); transform-origin: top center; }
+  .evil {
+    position: fixed; inset: 0; z-index: 16; display: flex; align-items: center; justify-content: center; text-align: center;
+    font-family: Anton, Impact, sans-serif; font-size: clamp(40px, 11vw, 110px); padding: 16px; pointer-events: all;
+  }
+  .evil.win { background: radial-gradient(circle, rgba(245,197,66,.55), rgba(0,0,0,.85)); color: var(--gold); text-shadow: 0 0 30px var(--gold); }
+  .evil.kidding { background: rgba(120,0,0,.85); color: #fff; animation: quake .12s infinite; }
+  .evil.dc { background: rgba(0,0,0,.92); color: #ccc; font-family: Inter, sans-serif; font-size: clamp(24px, 6vw, 44px); font-weight: 800; }
+  .evil.dc small { font-size: 60%; color: #888; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .clock {
+    position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 14; background: var(--red); color: #fff;
+    font-family: Anton, Impact, sans-serif; font-size: 44px; padding: 6px 22px; border-radius: 14px; border: 3px solid #fff;
+    box-shadow: 0 0 30px rgba(227,38,47,.8);
+  }
+  body.cursed-backwards #guessInput { transform: scaleX(-1); }
+  body.prank-invisible #guessInput { color: transparent; caret-color: transparent; }
+  #guessBtn { transition: left .15s, top .15s; }
   .frozen {
     position: fixed; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center; pointer-events: all;
     background: rgba(160, 220, 255, .35); backdrop-filter: blur(3px); font-family: Anton, Impact, sans-serif;
@@ -246,6 +263,8 @@
 </div>
 <div class="big-x" id="bigX"></div>
 <div class="toast hidden" id="toast"></div>
+<div class="evil hidden" id="evil"></div>
+<div class="clock hidden" id="clock"></div>
 <div class="frozen hidden" id="frozen">🧊 FROZEN 🧊</div>
 <div class="popup hidden" id="popup"><div class="popup-card"><div id="popupText"></div><button id="popupOk" class="mt">OK</button></div></div>
 
@@ -356,7 +375,23 @@
     fire("award", { team });
   }
 
-  const PRANKS = { freeze: 10000, flip: 10000, blackout: 8000, shake: 2000, fakeX: 1200, rainbow: 8000, tiny: 8000 };
+  const PRANKS = {
+    freeze: 10000, flip: 10000, blackout: 8000, shake: 2000, fakeX: 1200, rainbow: 8000, tiny: 8000,
+    fakeWin: 5000, fakeDC: 8000, runaway: 15000, scramble: 10000, fakeScore: 12000, airhorn: 3000, spam: 1, invisible: 15000,
+  };
+  const BLOCKING = { freeze: true, fakeDC: true }; // pranks that also stop the victim from guessing
+
+  // 5-second shot clock: guess in time or it counts as a miss
+  let shotClock = null;
+  function startClock(victim) {
+    if (shotClock) clearTimeout(shotClock.t);
+    const round = state.round;
+    shotClock = { team: victim, t: setTimeout(() => {
+      shotClock = null;
+      if (state.round === round && canGuess(state, victim)) { handleGuess(victim, "⏰ time ran out", true); commit(); }
+    }, 5300) };
+    fire("prank", { team: victim, kind: "clock", ms: 5000 });
+  }
   const frozenUntil = {};
 
   // Victim's screen "types" farts, then it's submitted as a guaranteed miss
@@ -386,6 +421,8 @@
     text = String(text || "").trim().slice(0, 40);
     if (!text || !state || (!forced && (fartPending[team] || frozenUntil[team] > Date.now()))) return;
     // Jinxed: whatever they typed, their device types "farts" instead
+    if (!forced && shotClock && shotClock.team === team && canGuess(state, team)) { clearTimeout(shotClock.t); shotClock = null; }
+    if (!forced && (state.backwards || {})[team]) text = [...text].reverse().join("");
     if (!forced && (state.jinx || {})[team] && canGuess(state, team)) return fartAttack(team);
     const q = curQ(state), nm = state.teams[team].name;
     // Admin toggle: a blocked team's steal always fails
@@ -478,9 +515,18 @@
     } else if (cmd === "msg") {
       const text = String(arg || "").trim().slice(0, 120);
       if (text) fire("msg", { team: other(team), text });
+    } else if (cmd === "rob") {
+      state.teams[team].score += state.teams[other(team)].score; state.teams[other(team)].score = 0;
+    } else if (cmd === "bankrupt" && live) {
+      state.bank = 0;
+    } else if (cmd === "clock" && canGuess(state, other(team))) {
+      startClock(other(team));
+    } else if (cmd === "backwards") {
+      state.backwards = state.backwards || {};
+      state.backwards[other(team)] = !state.backwards[other(team)];
     } else if (PRANKS[cmd]) {
       // Screen pranks play out on the victim's device; freeze also blocks their guesses here
-      if (cmd === "freeze") frozenUntil[other(team)] = Date.now() + PRANKS.freeze;
+      if (BLOCKING[cmd]) frozenUntil[other(team)] = Date.now() + PRANKS[cmd];
       fire("prank", { team: other(team), kind: cmd, ms: PRANKS[cmd] });
     } else if (cmd === "jinx" || cmd === "nosteal") {
       const k = cmd === "jinx" ? "jinx" : "blockSteal";
@@ -682,6 +728,7 @@
       if (canGuess && document.activeElement !== $("guessInput") && matchMedia("(pointer:fine)").matches) $("guessInput").focus();
     }
 
+    applyCurses(v);
     renderHack(v);
 
     if (v.event && v.event.n > lastEvent) {
@@ -712,6 +759,19 @@
   // Pranks sent from the other player's admin panel
   function prank(kind, ms) {
     if (kind === "fakeX") { sfx.buzz(); return bigX(1); }
+    if (kind === "airhorn") { for (let i = 0; i < 6; i++) { tone(466, 0.4, "sawtooth", 0.35, i * 0.5); tone(587, 0.4, "square", 0.2, i * 0.5); } return; }
+    if (kind === "spam") return spam(0);
+    if (kind === "clock") return shotClockUI(ms);
+    if (kind === "fakeWin") {
+      evil("🏆 YOU WIN! 🏆", "win"); sfx.win();
+      setTimeout(() => evil("JUST KIDDING 😈", "kidding"), 3000);
+      return setTimeout(() => evil(null), ms);
+    }
+    if (kind === "fakeDC") {
+      evil("📡 Connection lost<br><small>Reconnecting…</small>", "dc");
+      $("guessInput").disabled = $("guessBtn").disabled = true;
+      return setTimeout(() => { evil(null); $("guessInput").disabled = $("guessBtn").disabled = false; }, ms);
+    }
     const cls = "prank-" + kind;
     document.body.classList.add(cls);
     if (kind === "freeze") { $("guessInput").disabled = $("guessBtn").disabled = true; $("frozen").classList.remove("hidden"); }
@@ -719,7 +779,9 @@
     prank["t" + kind] = setTimeout(() => {
       document.body.classList.remove(cls);
       if (kind === "freeze") { $("guessInput").disabled = $("guessBtn").disabled = false; $("frozen").classList.add("hidden"); }
+      if (lastView) render(lastView);
     }, ms);
+    if (lastView && (kind === "scramble" || kind === "fakeScore")) render(lastView);
   }
   let popupDone = null;
   function popup(text, onOk) {
@@ -727,6 +789,47 @@
     $("popupText").textContent = text; $("popup").classList.remove("hidden"); tone(660, 0.2, "sine", 0.2);
   }
   $("popupOk").onclick = () => { $("popup").classList.add("hidden"); if (popupDone) popupDone(); };
+
+  function evil(html, mode) {
+    const el = $("evil");
+    if (!html) return el.classList.add("hidden");
+    el.innerHTML = html; el.className = "evil " + mode;
+  }
+  const SPAM = ["Are you sure about that answer?", "Your device has been taken over by 🐸", "Hint: the answer is not what you think", "Did you know? You're losing.",
+    "Click OK to continue being bad at this", "Loading better guesses… failed", "This message will self-destruct", "Just kidding. One more.", "OK fine, you can play now 😈"];
+  function spam(i) { if (i < SPAM.length) popup(SPAM[i], () => setTimeout(() => spam(i + 1), 150)); }
+  function shotClockUI(ms) {
+    const el = $("clock"); let left = Math.round(ms / 1000);
+    clearInterval(shotClockUI.i);
+    const tick = () => {
+      if (left <= 0) { clearInterval(shotClockUI.i); el.classList.add("hidden"); return; }
+      el.textContent = "⏱️ " + left; el.classList.remove("hidden"); tone(left <= 2 ? 1200 : 800, 0.12, "square", 0.2); left--;
+    };
+    tick(); shotClockUI.i = setInterval(tick, 1000);
+    if (canGuess(state, myTeam) && document.activeElement !== $("guessInput")) $("guessInput").focus();
+  }
+  // Runaway Guess button: it dodges your mouse/finger, and Enter doesn't work either
+  function dodge() {
+    if (!document.body.classList.contains("prank-runaway")) return false;
+    const b = $("guessBtn");
+    b.style.position = "relative";
+    b.style.left = (Math.random() * 300 - 250) + "px"; b.style.top = (Math.random() * 160 - 80) + "px";
+    return true;
+  }
+  $("guessBtn").addEventListener("pointerenter", dodge);
+  $("guessBtn").addEventListener("pointerdown", (e) => { if (dodge()) e.preventDefault(); });
+  // Visual curses applied after every render
+  let lastView = null;
+  function applyCurses(v) {
+    lastView = v;
+    document.body.classList.toggle("cursed-backwards", !!(v.backwards || {})[myTeam]);
+    if (document.body.classList.contains("prank-fakeScore")) $("team" + myTeam).querySelector(".pts").textContent = "-9,999";
+    if (document.body.classList.contains("prank-scramble"))
+      document.querySelectorAll("#board .txt, #question").forEach((el) => {
+        el.textContent = el.textContent.split(" ").map((w) => [...w].sort(() => Math.random() - 0.5).join("")).join(" ");
+      });
+    if (!document.body.classList.contains("prank-runaway")) { $("guessBtn").style.left = $("guessBtn").style.top = ""; }
+  }
 
   function bigX(count) {
     const el = $("bigX"); el.textContent = "X".repeat(count || 1);
@@ -736,6 +839,7 @@
   // ---------- Wire up UI ----------
   $("guessForm").addEventListener("submit", (e) => {
     e.preventDefault();
+    if (dodge()) return;
     const text = $("guessInput").value.trim();
     if (!text) return;
     $("guessInput").value = "";
@@ -791,6 +895,15 @@
         ${btn("blackout", "🌑 Black out their board", true)}${btn("shake", "📳 Earthquake", true)}
         ${btn("fakeX", "😱 Fake strike scare", true)}${btn("rainbow", "🌈 Rainbow mode", true)}
         ${btn("tiny", "🔍 Shrink their screen", true)}
+      </div>
+      <div class="hack-sec">😈 Downright EVIL</div>
+      <div class="hack-cmds">
+        ${btn("rob", `💰 Rob ALL of ${them}'s points`, true)}${btn("bankrupt", "💸 Bankrupt the bank")}
+        ${btn("clock", "⏱️ 5-second shot clock", canGuess(v, other(myTeam)))}${btn("backwards", `🔁 Backwards keyboard: ${(v.backwards || {})[other(myTeam)] ? "ON" : "OFF"}`, true)}
+        ${btn("fakeWin", "🏆 Fake “YOU WIN!” screen", true)}${btn("fakeDC", "📡 Fake disconnect (8s)", true)}
+        ${btn("runaway", "🏃 Runaway Guess button", true)}${btn("scramble", "🔀 Scramble their board", true)}
+        ${btn("fakeScore", "📉 Show them a -9,999 score", true)}${btn("invisible", "👻 Invisible typing", true)}
+        ${btn("airhorn", "📢 AIRHORN", true)}${btn("spam", "🌀 Pop-up spam", true)}
       </div>
       <div class="hack-sec">Pop-up message on their screen</div>
       <div class="row"><input id="hackMsg" type="text" maxlength="120" placeholder="e.g. Your answer was SO close…" value="${esc(msg)}"><button data-cmd="msg">Send</button></div>
